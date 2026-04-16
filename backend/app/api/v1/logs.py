@@ -1,19 +1,24 @@
 """BlackboxLog endpoints with file upload support."""
 
 from typing import Annotated
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import get_db_session
-from app.models import BlackboxLog, LogStatus
+from app.core.minio import minio_client
+from app.models import BlackboxLog, LogStatus, Drone
 from app.schemas import (
     BlackboxLogCreate,
     BlackboxLogUpdate,
     BlackboxLogResponse,
     BlackboxLogListResponse,
 )
+from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/logs", tags=["blackbox_logs"])
 
@@ -33,7 +38,7 @@ async def upload_log(
     Upload a blackbox log file (.BBL format).
     
     Returns the created log entry with metadata.
-    File will be processed asynchronously.
+    File will be processed asynchronously by Celery worker.
     """
     if not file.filename:
         raise HTTPException(
@@ -42,8 +47,6 @@ async def upload_log(
         )
 
     # Verify drone exists
-    from app.models import Drone
-
     query = select(Drone).where(Drone.id == drone_id)
     result = await session.execute(query)
     drone = result.scalar_one_or_none()
@@ -57,21 +60,45 @@ async def upload_log(
     # Read file content
     content = await file.read()
 
-    # TODO: Upload to MinIO
-    # For now, just create the log entry with pending status
+    # Upload to MinIO
+    minio_key = f"blackbox-logs/{drone_id}/{file.filename}"
+    try:
+        minio_client.upload_file(
+            bucket=minio_client.bucket_blackbox,
+            object_name=minio_key,
+            file_content=content,
+        )
+        logger.info(f"Uploaded file to MinIO: {minio_key}")
+    except Exception as e:
+        logger.error(f"Failed to upload file to MinIO: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload file to storage",
+        )
+
+    # Create log entry with pending status
     log_entry = BlackboxLog(
         drone_id=drone_id,
         file_name=file.filename,
-        file_path=f"blackbox-logs/{drone_id}/{file.filename}",
-        status=LogStatus.pending,
+        file_path=minio_key,
+        status=LogStatus.PENDING,
     )
 
     session.add(log_entry)
     await session.commit()
     await session.refresh(log_entry)
 
-    # TODO: Trigger Celery task to parse log
-    # celery_app.send_task('app.workers.tasks.parse_blackbox_log', args=[log_entry.id])
+    # Trigger Celery task to parse log
+    try:
+        celery_app.send_task(
+            "app.workers.tasks.parse_blackbox_log",
+            args=[log_entry.id],
+            priority=9,  # High priority
+        )
+        logger.info(f"Triggered parse_blackbox_log task for log {log_entry.id}")
+    except Exception as e:
+        logger.error(f"Failed to trigger parse task: {e}")
+        # Don't fail the request, the task will be retried later
 
     return BlackboxLogResponse.model_validate(log_entry)
 
