@@ -256,3 +256,113 @@ async def delete_log(
     # TODO: Delete file from MinIO
     await session.delete(log)
     await session.commit()
+
+
+@router.get(
+    "/{log_id}/analyses",
+    response_model=dict,
+    summary="Get all analyses for a log",
+)
+async def get_log_analyses(
+    log_id: int,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict:
+    """
+    Retrieve all persisted analysis results for a BlackboxLog.
+
+    Returns a dictionary keyed by analysis module name. Each value is a dict containing:
+    - `module` (str): analysis module name
+    - `result` (Any): parsed analysis payload from `result_json`
+    - `created_at` (str): ISO 8601 timestamp when the analysis was created
+
+    Returns an empty dictionary if no analyses exist yet (e.g., analyses are in-flight).
+
+    Raises:
+        HTTPException: 404 if the log does not exist.
+    """
+    from app.models import LogAnalysis
+    
+    # Verify log exists
+    log_query = select(BlackboxLog).where(BlackboxLog.id == log_id)
+    log_result = await session.execute(log_query)
+    log = log_result.scalar_one_or_none()
+    
+    if log is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log with ID {log_id} not found",
+        )
+    
+    # Fetch analyses
+    analysis_query = select(LogAnalysis).where(LogAnalysis.log_id == log_id)
+    analysis_result = await session.execute(analysis_query)
+    analyses = analysis_result.scalars().all()
+
+    # Organize by module
+    result = {}
+    for analysis in analyses:
+        result[analysis.module] = {
+            "module": analysis.module,
+            "result": analysis.result_json,
+            "created_at": analysis.created_at.isoformat(),
+        }
+
+    return result
+
+
+@router.get(
+    "/{log_id}/analyses/{module}",
+    response_model=dict,
+    summary="Get analysis for a specific module",
+)
+async def get_log_analysis(
+    log_id: int,
+    module: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict:
+    """
+    Retrieve the analysis result for a specific analysis module within a blackbox log.
+    
+    Parameters:
+        module (str): Analysis module name (e.g., "step_response", "fft_noise", "pid_error", "motor_analysis", "tune_score").
+    
+    Returns:
+        dict: Mapping with keys:
+            - "module": the analysis module name.
+            - "result": the analysis payload as stored in `result_json`.
+            - "created_at": ISO 8601 timestamp string of when the analysis was created.
+    """
+    from app.models import LogAnalysis
+    
+    # Verify log exists
+    log_query = select(BlackboxLog).where(BlackboxLog.id == log_id)
+    log_result = await session.execute(log_query)
+    log = log_result.scalar_one_or_none()
+    
+    if log is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log with ID {log_id} not found",
+        )
+    
+    # Fetch specific analysis
+    analysis_query = select(LogAnalysis).where(
+        and_(
+            LogAnalysis.log_id == log_id,
+            LogAnalysis.module == module,
+        )
+    )
+    analysis_result = await session.execute(analysis_query)
+    analysis = analysis_result.scalar_one_or_none()
+    
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No analysis found for module '{module}' in log {log_id}",
+        )
+    
+    return {
+        "module": analysis.module,
+        "result": analysis.result_json,
+        "created_at": analysis.created_at.isoformat(),
+    }

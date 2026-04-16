@@ -1,0 +1,132 @@
+"""PID error tracking - measure control errors and PID performance."""
+
+import logging
+import numpy as np
+from typing import Dict, Any, Optional
+
+from .utils import extract_field_data, calculate_stats, calculate_rms
+
+logger = logging.getLogger(__name__)
+
+
+def analyze_pid_error(parser) -> Dict[str, Any]:
+    """
+    Analyze PID control error for roll, pitch, and yaw axes.
+    
+    For each axis, computes the error between commanded rate (`setpoint[i]`) and measured rate (`gyroADC[i]`) and returns per-axis metrics such as RMS error, maximum absolute error, mean absolute error, error drift (trend), derivative-like RMS, percentile magnitudes (p50/p75/p90/p99), and additional summary statistics.
+    
+    Parameters:
+        parser: Parser instance that provides time-series fields (must supply `setpoint[i]` and `gyroADC[i]`).
+    
+    Returns:
+        A dict with keys "roll", "pitch", and "yaw". Each value is either a metrics dict containing the computed error statistics or an `{"error": "<message>"}` dict when data is missing or analysis failed.
+    """
+    result = {}
+    
+    # Analyze each axis (roll=0, pitch=1, yaw=2)
+    axes = [("roll", 0), ("pitch", 1), ("yaw", 2)]
+    
+    for axis_name, axis_idx in axes:
+        # Use setpoint as the desired output (more stable than rcCommand)
+        rate_field = f"setpoint[{axis_idx}]"
+        gyro_field = f"gyroADC[{axis_idx}]"
+        
+        rate_cmd = extract_field_data(parser, rate_field)
+        gyro_data = extract_field_data(parser, gyro_field)
+        
+        if gyro_data is None or rate_cmd is None:
+            logger.warning(f"Missing data for {axis_name} axis")
+            result[axis_name] = {"error": f"Missing {axis_name} data"}
+            continue
+        
+        try:
+            # Calculate error as difference between commanded and actual
+            # Need to ensure arrays are same length
+            min_len = min(len(gyro_data), len(rate_cmd))
+            error = rate_cmd[:min_len] - gyro_data[:min_len]
+            
+            axis_result = _analyze_axis_error(error, axis=axis_name)
+            result[axis_name] = axis_result
+        except Exception as e:
+            logger.error(f"Error analyzing {axis_name} PID error: {e}")
+            result[axis_name] = {"error": str(e)}
+    
+    return result
+
+
+def _analyze_axis_error(error: np.ndarray, axis: str = "unknown") -> Dict[str, Any]:
+    """
+    Compute a set of error metrics for a single control axis from a 1-D error signal.
+    
+    Parameters:
+        error (np.ndarray): Array of error values (commanded - measured) for the axis; NaN values will be ignored.
+        axis (str): Optional axis name used for context in results (e.g., "roll", "pitch", "yaw").
+    
+    Returns:
+        Dict[str, Any]: Dictionary with computed metrics or an error entry when input is empty/invalid. When successful, the dictionary contains:
+            - "rms_error" (float): Root-mean-square of the error signal.
+            - "max_error" (float): Maximum absolute error.
+            - "mean_abs_error" (float): Mean of the absolute error.
+            - "error_stats" (dict): Additional summary statistics produced by calculate_stats for the raw error array.
+            - "error_drift" (float): Trend slope of per-chunk mean absolute error (positive = increasing magnitude, negative = decreasing).
+            - "error_derivative_rms" (float): RMS of the first difference of the error signal (derivative-like metric).
+            - "error_percentiles" (dict): Absolute-error percentiles with keys "p50", "p75", "p90", and "p99" (all floats).
+        If the input contains no samples or no valid (non-NaN) values, returns {"error": "No error data"} or {"error": "No valid error data"} respectively.
+    """
+    if len(error) < 1:
+        return {"error": "No error data"}
+    
+    # Remove any NaN values
+    error_clean = error[~np.isnan(error)]
+    
+    if len(error_clean) < 1:
+        return {"error": "No valid error data"}
+    
+    # Calculate metrics
+    rms_error = calculate_rms(error_clean)
+    max_error = float(np.max(np.abs(error_clean)))
+    mean_abs_error = float(np.mean(np.abs(error_clean)))
+    
+    # Error statistics
+    error_stats = calculate_stats(error_clean)
+    
+    # Calculate error drift (trend over time)
+    # Divide signal into 10 chunks and check if error is increasing/decreasing
+    chunk_size = len(error_clean) // 10
+    drift = 0.0
+    
+    if chunk_size > 1:
+        chunk_means = []
+        for i in range(10):
+            start = i * chunk_size
+            end = (i + 1) * chunk_size if i < 9 else len(error_clean)
+            if start < end:
+                chunk_means.append(np.mean(np.abs(error_clean[start:end])))
+        
+        if len(chunk_means) > 1:
+            # Calculate trend using linear fit
+            x = np.arange(len(chunk_means))
+            z = np.polyfit(x, chunk_means, 1)
+            drift = float(z[0])  # Slope of trend
+    
+    # Proportional/Integral/Derivative-like error breakdown
+    error_deriv = np.diff(error_clean)
+    
+    result = {
+        "rms_error": rms_error,
+        "max_error": max_error,
+        "mean_abs_error": mean_abs_error,
+        "error_stats": error_stats,
+        "error_drift": drift,  # Positive = increasing error, negative = decreasing
+        "error_derivative_rms": calculate_rms(error_deriv) if len(error_deriv) > 0 else 0.0,
+    }
+    
+    # Calculate error percentiles
+    result["error_percentiles"] = {
+        "p50": float(np.percentile(np.abs(error_clean), 50)),
+        "p75": float(np.percentile(np.abs(error_clean), 75)),
+        "p90": float(np.percentile(np.abs(error_clean), 90)),
+        "p99": float(np.percentile(np.abs(error_clean), 99)),
+    }
+    
+    return result

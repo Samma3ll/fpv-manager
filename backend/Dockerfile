@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
+    bash \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
@@ -16,9 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Copy and make entrypoint executable
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# Make entrypoint executable and handle line endings
+RUN dos2unix docker-entrypoint.sh || sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 EXPOSE 8000
 
@@ -26,8 +27,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Use entrypoint script for migrations + app startup
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
-
-# Default CMD (can be overridden)
-CMD []
+# Use exec form to make uvicorn PID 1
+# Note: Run migrations separately via docker-entrypoint or init container
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

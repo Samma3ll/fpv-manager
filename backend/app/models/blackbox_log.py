@@ -66,7 +66,7 @@ class BlackboxLog(Base):
     pid_yaw = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     tags = Column(JSON, default=list, nullable=False)  # ["racing", "tuning_experiment"]
-    status = Column(Enum(LogStatus), default=LogStatus.PENDING, nullable=False, index=True)
+    status = Column(String(20), default=LogStatus.PENDING.value, nullable=False, index=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
