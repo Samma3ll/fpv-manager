@@ -71,7 +71,7 @@ export function ComparePage() {
           return
         }
         setLogs(response.items)
-        setSelectedLogIds((current) => current.filter((id) => response.items.some((log) => log.id === id)))
+        setSelectedLogIds((current) => current.filter((id) => response.items.some((log: BlackboxLog) => log.id === id)))
       } catch (loadError) {
         if (active) {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load logs.')
@@ -176,26 +176,31 @@ export function ComparePage() {
             </label>
 
             <div className="compare-picker">
-              {logs.map((log) => (
-                <label className="compare-option" key={log.id}>
-                  <input
-                    checked={selectedLogIds.includes(log.id)}
-                    type="checkbox"
-                    onChange={(event) => {
-                      setSelectedLogIds((current) => {
-                        if (event.target.checked) {
-                          return [...current, log.id].slice(-4)
-                        }
-                        return current.filter((id) => id !== log.id)
-                      })
-                    }}
-                  />
-                  <div>
-                    <strong>{log.file_name}</strong>
-                    <span>{formatDate(log.flight_date ?? log.created_at)}</span>
-                  </div>
-                </label>
-              ))}
+              {logs.map((log) => {
+                const isSelected = selectedLogIds.includes(log.id)
+                const isDisabled = !isSelected && selectedLogIds.length >= 4
+                return (
+                  <label className="compare-option" key={log.id}>
+                    <input
+                      checked={isSelected}
+                      disabled={isDisabled}
+                      type="checkbox"
+                      onChange={(event) => {
+                        setSelectedLogIds((current) => {
+                          if (event.target.checked) {
+                            return [...current, log.id]
+                          }
+                          return current.filter((id) => id !== log.id)
+                        })
+                      }}
+                    />
+                    <div>
+                      <strong>{log.file_name}</strong>
+                      <span>{formatDate(log.flight_date ?? log.created_at)}</span>
+                    </div>
+                  </label>
+                )
+              })}
             </div>
           </div>
         )}

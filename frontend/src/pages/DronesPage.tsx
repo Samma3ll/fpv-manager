@@ -26,13 +26,26 @@ export function DronesPage() {
     setError(null)
 
     try {
-      const [dronesResponse, logsResponse] = await Promise.all([
-        client.listDrones(),
-        client.listLogs({ limit: 100 }),
-      ])
+      const dronesResponse = await client.listDrones()
+
+      // Fetch all logs by paginating through the entire dataset
+      const allLogs: BlackboxLog[] = []
+      let skip = 0
+      const limit = 100
+
+      while (true) {
+        const logsResponse = await client.listLogs({ limit, skip })
+        allLogs.push(...logsResponse.items)
+
+        if (allLogs.length >= logsResponse.total || logsResponse.items.length < limit) {
+          break
+        }
+
+        skip += limit
+      }
 
       setDrones(dronesResponse.items)
-      setLogs(logsResponse.items)
+      setLogs(allLogs)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load drones.')
     } finally {
@@ -77,8 +90,12 @@ export function DronesPage() {
       return
     }
 
-    await client.deleteDrone(droneId)
-    await load()
+    try {
+      await client.deleteDrone(droneId)
+      await load()
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete drone.')
+    }
   }
 
   return (

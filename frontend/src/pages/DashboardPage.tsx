@@ -98,7 +98,9 @@ export function DashboardPage() {
 
         {error ? <p className="inline-error">{error}</p> : null}
 
-        {!loading && recentLogs.length === 0 ? (
+        {loading ? (
+          <p className="muted-copy">Loading recent activity...</p>
+        ) : !loading && recentLogs.length === 0 ? (
           <EmptyState
             title="No logs yet"
             body="Create a drone first, then upload a .bbl file to start analysis."

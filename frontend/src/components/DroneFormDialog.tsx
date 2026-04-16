@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { FormEvent, ChangeEvent } from 'react'
 import type { Drone, DroneFormValues } from '../types'
 
 interface DroneFormDialogProps {
@@ -57,19 +58,45 @@ export function DroneFormDialog({ open, drone, onClose, onSubmit }: DroneFormDia
   const [values, setValues] = useState<DroneFormValues>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const firstFieldRef = useRef<HTMLInputElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (open) {
       setValues(toFormValues(drone))
       setError(null)
+      previousFocusRef.current = document.activeElement as HTMLElement
+      setTimeout(() => {
+        firstFieldRef.current?.focus()
+      }, 0)
+    } else {
+      previousFocusRef.current?.focus()
+      previousFocusRef.current = null
     }
   }, [drone, open])
+
+  useEffect(() => {
+    if (!open) {
+      return undefined
+    }
+
+    function handleKeydown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeydown)
+    return () => {
+      document.removeEventListener('keydown', handleKeydown)
+    }
+  }, [open, onClose])
 
   if (!open) {
     return null
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSubmitting(true)
     setError(null)
@@ -86,7 +113,7 @@ export function DroneFormDialog({ open, drone, onClose, onSubmit }: DroneFormDia
   }
 
   function handleChange(
-    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) {
     const { name, value } = event.target
     setValues((current) => ({ ...current, [name]: value }))
@@ -108,7 +135,7 @@ export function DroneFormDialog({ open, drone, onClose, onSubmit }: DroneFormDia
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
             <span>Name</span>
-            <input name="name" value={values.name} onChange={handleChange} required />
+            <input ref={firstFieldRef} name="name" value={values.name} onChange={handleChange} required />
           </label>
           <label>
             <span>Frame size</span>

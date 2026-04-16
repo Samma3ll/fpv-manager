@@ -56,12 +56,14 @@ export function LogDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  async function load() {
+  async function load(initial = true) {
     if (!Number.isFinite(logId)) {
       return
     }
 
-    setLoading(true)
+    if (initial) {
+      setLoading(true)
+    }
     try {
       const [logResponse, analysesResponse] = await Promise.all([
         client.getLog(logId),
@@ -74,7 +76,9 @@ export function LogDetailPage() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load log.')
     } finally {
-      setLoading(false)
+      if (initial) {
+        setLoading(false)
+      }
     }
   }
 
@@ -88,7 +92,7 @@ export function LogDetailPage() {
     }
 
     const timer = window.setInterval(() => {
-      void load()
+      void load(false)
     }, 5000)
 
     return () => window.clearInterval(timer)

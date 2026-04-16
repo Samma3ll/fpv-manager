@@ -92,24 +92,32 @@ export function DroneDetailPage() {
     const selectedFiles = Array.from(files)
     setUploads(selectedFiles.map((file) => ({ name: file.name, percent: 0 })))
 
-    for (const file of selectedFiles) {
-      await client.uploadLog(drone.id, file, (percent) => {
-        setUploads((current) =>
-          current.map((item) => (item.name === file.name ? { ...item, percent } : item)),
-        )
-      })
+    try {
+      for (const file of selectedFiles) {
+        await client.uploadLog(drone.id, file, (percent: number) => {
+          setUploads((current) =>
+            current.map((item) => (item.name === file.name ? { ...item, percent } : item)),
+          )
+        })
+      }
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Upload failed.')
+    } finally {
+      setUploads([])
+      await load()
     }
-
-    setUploads([])
-    await load()
   }
 
   async function handleSaveLog(logId: number) {
-    await client.updateLog(logId, { notes: noteDraft, tags: tagDraft })
-    setEditLogId(null)
-    setNoteDraft('')
-    setTagDraft('')
-    await load()
+    try {
+      await client.updateLog(logId, { notes: noteDraft, tags: tagDraft })
+      setEditLogId(null)
+      setNoteDraft('')
+      setTagDraft('')
+      await load()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save log.')
+    }
   }
 
   async function handleDeleteLog(logId: number) {
@@ -118,8 +126,12 @@ export function DroneDetailPage() {
       return
     }
 
-    await client.deleteLog(logId)
-    await load()
+    try {
+      await client.deleteLog(logId)
+      await load()
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Failed to delete log.')
+    }
   }
 
   if (!Number.isFinite(droneId)) {

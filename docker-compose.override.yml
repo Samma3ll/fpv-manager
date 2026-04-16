@@ -1,5 +1,10 @@
 # Development overrides for hot reload and faster iteration
 # This file is automatically merged with docker-compose.yml when using `docker compose up`
+#
+# IMPORTANT: This file uses the !override YAML tag (lines 41, 46) which requires
+# Docker Compose v2.24.0 or newer. The !override tag prevents merging of arrays
+# (ports, healthcheck) and replaces them entirely instead of concatenating.
+# See: https://docs.docker.com/compose/multiple-compose-files/merge/
 
 services:
   minio-init:
