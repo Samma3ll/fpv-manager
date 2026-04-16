@@ -59,9 +59,27 @@ async def get_db_session() -> AsyncSession:
 
 
 async def init_db() -> None:
-    """Initialize database tables."""
+    """Initialize database tables if using direct creation (not migrations).
+    
+    Checks if Alembic migration tracking table exists. If it does,
+    migrations are being used and table creation is skipped.
+    If not, creates all tables for development convenience.
+    """
+    from sqlalchemy import text
+    
     engine = get_engine()
+    
+    # Check if alembic_version table exists (indicates migrations are in use)
     async with engine.begin() as conn:
+        try:
+            await conn.execute(text("SELECT 1 FROM alembic_version LIMIT 1"))
+            # If we get here, migrations table exists - skip create_all
+            return
+        except Exception:
+            # alembic_version doesn't exist, safe to use create_all
+            pass
+        
+        # Create all tables
         await conn.run_sync(Base.metadata.create_all)
 
 
