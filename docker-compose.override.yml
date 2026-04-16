@@ -38,7 +38,13 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     command: npm run dev
-    ports:
+    ports: !override
       - "5173:5173"
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=/api/v1
+      - VITE_PROXY_TARGET=http://backend:8000
+    healthcheck: !override
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:5173"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
