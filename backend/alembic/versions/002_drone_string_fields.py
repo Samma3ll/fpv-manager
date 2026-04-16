@@ -34,8 +34,10 @@ def downgrade() -> None:
     op.alter_column('drones', 'frame_size',
                     existing_type=sa.String(50),
                     type_=sa.Float(),
-                    nullable=True)
+                    nullable=True,
+                    postgresql_using="(regexp_replace(frame_size, '[^0-9.]', '', 'g'))::double precision")
     op.alter_column('drones', 'prop_size',
                     existing_type=sa.String(50),
                     type_=sa.Float(),
-                    nullable=True)
+                    nullable=True,
+                    postgresql_using="(regexp_replace(prop_size, '[^0-9.]', '', 'g'))::double precision")

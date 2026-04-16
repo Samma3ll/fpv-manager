@@ -75,17 +75,20 @@ def run_migrations_online() -> None:
             future=True,
         )
 
-        async with engine.begin() as connection:
-            # Run migrations in a sync context within the async connection
-            def run_migrations_sync(sync_conn):
-                context.configure(
-                    connection=sync_conn,
-                    target_metadata=target_metadata
-                )
-                with context.begin_transaction():
-                    context.run_migrations()
-            
-            await connection.run_sync(run_migrations_sync)
+        try:
+            async with engine.begin() as connection:
+                # Run migrations in a sync context within the async connection
+                def run_migrations_sync(sync_conn):
+                    context.configure(
+                        connection=sync_conn,
+                        target_metadata=target_metadata
+                    )
+                    with context.begin_transaction():
+                        context.run_migrations()
+
+                await connection.run_sync(run_migrations_sync)
+        finally:
+            await engine.dispose()
 
     asyncio.run(do_run_migrations())
 
