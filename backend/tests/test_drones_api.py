@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,7 +28,7 @@ def _result_with_scalars(values):
 
 
 def _sample_drone(drone_id=1, name="Demo Drone"):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return Drone(
         id=drone_id,
         name=name,
@@ -44,8 +44,8 @@ async def test_create_drone_creates_and_returns_response():
 
     async def refresh_side_effect(drone):
         drone.id = 12
-        drone.created_at = datetime.utcnow()
-        drone.updated_at = datetime.utcnow()
+        drone.created_at = datetime.now(timezone.utc)
+        drone.updated_at = datetime.now(timezone.utc)
 
     session.refresh = AsyncMock(side_effect=refresh_side_effect)
     payload = DroneCreate(name="New Drone", motor_kv=2300)

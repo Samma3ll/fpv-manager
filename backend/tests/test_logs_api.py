@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,7 +31,7 @@ def _scalars_result(values):
 
 
 def _sample_drone(drone_id=1):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return Drone(id=drone_id, name=f"Drone {drone_id}", created_at=now, updated_at=now)
 
 
@@ -43,7 +43,7 @@ def _sample_log(log_id=1, drone_id=1, status=LogStatus.PENDING):
         file_path=f"blackbox-logs/{drone_id}/flight.bbl",
         status=status,
         tags=[],
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
 
 
@@ -56,7 +56,7 @@ async def test_upload_log_success_creates_entry_and_enqueues_task():
 
     async def refresh_side_effect(log_entry):
         log_entry.id = 77
-        log_entry.created_at = datetime.utcnow()
+        log_entry.created_at = datetime.now(timezone.utc)
         if log_entry.tags is None:
             log_entry.tags = []
 
@@ -182,7 +182,7 @@ async def test_get_log_analyses_returns_module_keyed_mapping():
         log_id=1,
         module="pid_error",
         result_json={"rms_error": 0.22},
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     session = AsyncMock()
     session.execute = AsyncMock(
