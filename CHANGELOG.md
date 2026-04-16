@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Phase 3 - Backend API (FastAPI) ✅
 - Pydantic request/response schemas with validation (DroneCreate, DroneUpdate, DroneResponse, BlackboxLogCreate, BlackboxLogResponse, etc.)
 - Drone CRUD endpoints: POST /api/v1/drones, GET /api/v1/drones (paginated), GET /api/v1/drones/{id}, PATCH /api/v1/drones/{id}, DELETE /api/v1/drones/{id}
-- BlackboxLog endpoints: POST /api/v1/logs/upload, GET /api/v1/logs (with filtering by drone_id/status), GET /api/v1/logs/{id}, PATCH /api/v1/logs/{id}, DELETE /api/v1/logs/{id}
+- BlackboxLog endpoints: POST /api/v1/logs/upload (file upload endpoint), GET /api/v1/logs (with filtering by drone_id/status), GET /api/v1/logs/{id}, PATCH /api/v1/logs/{id}, DELETE /api/v1/logs/{id}
 - Async SQLAlchemy database queries with proper error handling and HTTP status codes
 - Database session dependency injection in route handlers
 - API error handling with descriptive error messages (404, 400, 201, 204)
@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker entrypoint script for automatic migration execution on startup
 - Alembic async migration support with asyncpg driver
 - Field validation with Pydantic constraints (min/max lengths, numeric ranges, required fields)
+- **Note**: MinIO file storage and Celery task triggering are Phase 4 features (currently TODO)
 
 ### Phase 2 - Database Schema & ORM ✅
 - SQLAlchemy models: Drone, BlackboxLog (with LogStatus enum), LogAnalysis, Module
@@ -35,20 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-#### Phase 2 - Database Schema & ORM
-- SQLAlchemy models for Drone, BlackboxLog, LogAnalysis, Module
-- Alembic migrations
-- Database indexes and relationships
-
-#### Phase 3 - Backend API (FastAPI)
-- CRUD endpoints for drones and logs
-- File upload to MinIO
-- Task queue integration for async processing
-
 #### Phase 4 - Log Parsing Worker
-- Celery task for parsing .BBL files using orangebox
-- Header extraction (PID, filter settings, version)
-- Time-series data export to Parquet format
+- MinIO file upload integration (store .BBL files in S3-compatible storage)
+- Celery task triggering on file upload
+- Parse .BBL files using orangebox library
+- Extract Betaflight metadata (PID values, version, craft name, flight duration)
+- Update log entry with parsed metadata and "ready" status
+- Error handling and "error" status for failed parses
+- Task monitoring and status updates
 
 #### Phase 5 - Analysis Modules
 - Step response analysis
