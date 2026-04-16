@@ -8,13 +8,13 @@ cd /app
 
 # Run Alembic migrations (only if not already applied)
 echo "📦 Running database migrations..."
-alembic upgrade head || echo "⚠️  Migrations skipped (already up to date)"
+alembic upgrade head
 
 # Start the application
 echo "🚀 Starting FastAPI server..."
 # If arguments are provided, use them (for --reload etc)
 if [ $# -gt 0 ]; then
-    exec uvicorn app.main:app "$@"
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 "$@"
 else
     exec uvicorn app.main:app --host 0.0.0.0 --port 8000
 fi

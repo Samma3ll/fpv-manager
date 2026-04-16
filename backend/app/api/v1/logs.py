@@ -46,6 +46,14 @@ async def upload_log(
             detail="No file name provided",
         )
 
+    # Validate file extension
+    filename_lower = file.filename.strip().lower()
+    if not filename_lower.endswith('.bbl'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type: expected .BBL",
+        )
+
     # Verify drone exists
     query = select(Drone).where(Drone.id == drone_id)
     result = await session.execute(query)
