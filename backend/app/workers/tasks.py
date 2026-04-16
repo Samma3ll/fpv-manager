@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, name="test_task")
 def test_task(self, x: int, y: int) -> int:
-    """Test task for Celery setup verification."""
+    """
+    Compute the sum of two integers.
+    
+    Parameters:
+        x (int): First addend.
+        y (int): Second addend.
+    
+    Returns:
+        int: Sum of `x` and `y`.
+    """
     logger.info(f"Executing test_task: {x} + {y}")
     return x + y
 
@@ -24,19 +33,48 @@ def test_task(self, x: int, y: int) -> int:
 @shared_task(bind=True, name="parse_blackbox_log", max_retries=3)
 def parse_blackbox_log(self, log_id: int):
     """
-    Parse a Betaflight blackbox log file.
+    Parse a Betaflight blackbox log, update its BlackboxLog record, and return a summary of the parsing outcome.
     
-    This task:
-    1. Downloads log from MinIO
-    2. Parses with orangebox
-    3. Extracts headers and metadata
-    4. Updates log entry with parsed data
-    5. Sets status to 'ready' or 'error'
+    This task downloads the log file from MinIO, parses it with the orangebox Parser, extracts header metadata (Betaflight firmware revision, craft name, and the first P value from roll/pitch/yaw PID arrays when present), attempts to compute flight duration from frame time data, and persists extracted fields to the database. The task transitions the BlackboxLog.status through PROCESSING to READY on success or to ERROR on failure, and writes an error message into BlackboxLog.error_message when parsing fails. On unexpected outer errors the task will trigger Celery retry logic.
+    
+    Parameters:
+        log_id (int): Primary key of the BlackboxLog row to parse.
+    
+    Returns:
+        dict: A result summary containing at least the keys:
+            - "log_id": the provided `log_id`
+            - "status": final status value stored on the BlackboxLog
+            - "craft_name": extracted craft name or `None`
+            - "betaflight_version": extracted firmware revision or `None`
     """
     logger.info(f"Starting to parse log {log_id}")
     
     # Get database session
     async def _parse_and_update():
+        """
+        Parse a blackbox log file, update the corresponding BlackboxLog database record, and return a summary of the outcome.
+        
+        This function fetches the BlackboxLog row for the enclosing `log_id`, marks it PROCESSING, downloads the file from MinIO, parses metadata and frame-derived duration using orangebox (when available), updates PID/version/craft/duration fields, and marks the record READY on success or ERROR on failure. It commits database changes at key steps and returns a concise result describing the final state.
+        
+        Returns:
+            dict: Result summary. Two common shapes:
+                - On success or regular error handling:
+                    {
+                        "log_id": int,
+                        "status": LogStatus | str,          # final status value set on the DB row
+                        "craft_name": str | None,           # extracted craft name or None
+                        "betaflight_version": str | None,   # extracted firmware revision or None
+                    }
+                - If the log row was not found:
+                    {
+                        "log_id": int,
+                        "status": "error",
+                        "message": "Log entry not found"
+                    }
+        
+        Raises:
+            celery.exceptions.Retry: Re-raises unexpected errors via `self.retry` to schedule a task retry.
+        """
         session_factory = get_session_factory()
         async with session_factory() as session:
             # Fetch log entry
