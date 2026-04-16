@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import init_db
+from app.api import v1_router
 
 # Configure logging
 logging.basicConfig(level=settings.log_level)
@@ -46,6 +47,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include API v1 router
+app.include_router(v1_router, prefix="/api")
 
 
 @app.get("/health")
