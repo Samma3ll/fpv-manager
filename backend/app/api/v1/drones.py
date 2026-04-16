@@ -7,6 +7,7 @@ from pathlib import Path
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from minio.error import S3Error
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,7 +121,7 @@ async def upload_drone_picture(
             object_name=new_object_key,
             file_content=content,
         )
-    except Exception:
+    except S3Error:
         logger.exception("Failed to upload drone picture to object storage")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -138,7 +139,7 @@ async def upload_drone_picture(
                 bucket=minio_client.bucket_assets,
                 object_name=old_picture,
             )
-        except Exception:
+        except S3Error:
             logger.warning("Failed to delete old drone picture '%s'", old_picture)
 
     return DroneResponse.model_validate(drone)
@@ -174,7 +175,7 @@ async def get_drone_picture(
             bucket=minio_client.bucket_assets,
             object_name=drone.picture_path,
         )
-    except Exception:
+    except S3Error:
         logger.exception("Failed to download drone picture from object storage")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
