@@ -1,11 +1,12 @@
 """Database connection and session management."""
 
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncSession,
     async_sessionmaker,
 )
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
 from app.core.config import settings
 
@@ -13,6 +14,8 @@ from app.core.config import settings
 # Engine and session will be initialized lazily
 engine = None
 AsyncSessionLocal = None
+sync_engine = None
+SyncSessionLocal = None
 
 
 class Base(DeclarativeBase):
@@ -49,6 +52,38 @@ def get_session_factory():
             autocommit=False,
         )
     return AsyncSessionLocal
+
+
+def get_sync_engine():
+    """Get or create the synchronous engine for Celery workers (lazy initialization)."""
+    global sync_engine
+    if sync_engine is None:
+        # Convert async database URL to sync URL
+        sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+        sync_engine = create_engine(
+            sync_url,
+            echo=settings.debug,
+            future=True,
+            pool_pre_ping=True,
+            pool_size=20,
+            max_overflow=10,
+        )
+    return sync_engine
+
+
+def get_sync_session_factory():
+    """Get or create the synchronous session factory for Celery workers (lazy initialization)."""
+    global SyncSessionLocal
+    if SyncSessionLocal is None:
+        engine = get_sync_engine()
+        SyncSessionLocal = sessionmaker(
+            engine,
+            class_=Session,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
+    return SyncSessionLocal
 
 
 async def get_db_session() -> AsyncSession:

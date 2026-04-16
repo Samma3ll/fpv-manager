@@ -15,7 +15,10 @@ print(f"Yaw PID: {headers.get('yawPID', 'N/A')}")
 print("\n=== FRAMES ===")
 frames = list(parser.frames())
 print(f"Total: {len(frames)}")
-print(f"Frame type: {type(frames[0])}")
+if not frames:
+    print("No frames found in log")
+else:
+    print(f"Frame type: {type(frames[0])}")
 
 # Find time field index
 time_idx = None
@@ -25,7 +28,7 @@ for i, field in enumerate(parser.field_names):
         print(f"Time field index: {i}")
         break
 
-if time_idx is not None and len(frames) >= 2:
+if frames and time_idx is not None and len(frames) >= 2:
     t_first = frames[0].data[time_idx]
     t_last = frames[-1].data[time_idx]
     print(f"First time: {t_first}")

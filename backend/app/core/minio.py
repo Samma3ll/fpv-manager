@@ -2,6 +2,7 @@
 
 import logging
 from io import BytesIO
+from urllib.parse import urlparse
 from minio import Minio
 from minio.error import S3Error
 
@@ -16,16 +17,21 @@ class MinIOClient:
     def __init__(self):
         """
         Initialize the MinIO client using application configuration.
-        
+
         Creates and stores a configured Minio SDK client on the instance and sets
         the `bucket_blackbox` and `bucket_assets` attributes to the configured
         bucket names from settings.
         """
+        # Parse URL to detect scheme and set secure flag
+        parsed_url = urlparse(settings.minio_public_url)
+        secure = parsed_url.scheme == "https"
+        endpoint = settings.minio_public_url.replace("http://", "").replace("https://", "")
+
         self.client = Minio(
-            settings.minio_public_url.replace("http://", "").replace("https://", ""),
+            endpoint,
             access_key=settings.minio_root_user,
             secret_key=settings.minio_root_password,
-            secure=False,  # http for development
+            secure=secure,
         )
         self.bucket_blackbox = settings.minio_bucket_blackbox_logs
         self.bucket_assets = settings.minio_bucket_assets
@@ -63,26 +69,30 @@ class MinIOClient:
     def download_file(self, bucket: str, object_name: str) -> bytes:
         """
         Download an object from MinIO and return its contents.
-        
+
         Parameters:
             bucket (str): Name of the bucket.
             object_name (str): Object key or path within the bucket.
-        
+
         Returns:
             bytes: The object's content.
-        
+
         Raises:
             S3Error: If the object cannot be retrieved.
         """
+        response = None
         try:
             response = self.client.get_object(bucket_name=bucket, object_name=object_name)
             content = response.read()
-            response.close()
             logger.info(f"Downloaded {object_name} from {bucket}")
             return content
         except S3Error as e:
             logger.error(f"Failed to download {object_name} from {bucket}: {e}")
             raise
+        finally:
+            if response is not None:
+                response.close()
+                response.release_conn()
 
     def delete_file(self, bucket: str, object_name: str) -> None:
         """
@@ -105,19 +115,24 @@ class MinIOClient:
     def file_exists(self, bucket: str, object_name: str) -> bool:
         """
         Determine whether an object with the given name exists in the specified bucket.
-        
+
         Parameters:
             bucket (str): Name of the bucket to check.
             object_name (str): Object key or path within the bucket.
-        
+
         Returns:
             `true` if the object exists in the bucket, `false` otherwise.
+
+        Raises:
+            S3Error: If the check fails for reasons other than the object not existing.
         """
         try:
             self.client.stat_object(bucket_name=bucket, object_name=object_name)
             return True
-        except S3Error:
-            return False
+        except S3Error as e:
+            if e.code == "NoSuchKey":
+                return False
+            raise
 
 
 # Global MinIO client instance

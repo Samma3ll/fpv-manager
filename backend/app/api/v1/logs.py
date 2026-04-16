@@ -2,6 +2,7 @@
 
 from typing import Annotated
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy import select, func, and_
@@ -76,8 +77,9 @@ async def upload_log(
     # Read file content
     content = await file.read()
 
-    # Upload to MinIO
-    minio_key = f"blackbox-logs/{drone_id}/{file.filename}"
+    # Generate unique object key using UUID to prevent overwrites
+    unique_id = uuid.uuid4()
+    minio_key = f"blackbox-logs/{drone_id}/{unique_id}.bbl"
     try:
         minio_client.upload_file(
             bucket=minio_client.bucket_blackbox,
@@ -107,14 +109,22 @@ async def upload_log(
     # Trigger Celery task to parse log
     try:
         celery_app.send_task(
-            "app.workers.tasks.parse_blackbox_log",
+            "parse_blackbox_log",
             args=[log_entry.id],
             priority=9,  # High priority
         )
         logger.info(f"Triggered parse_blackbox_log task for log {log_entry.id}")
     except Exception as e:
         logger.error(f"Failed to trigger parse task: {e}")
-        # Don't fail the request, the task will be retried later
+        # Update log status to ERROR and save error message
+        log_entry.status = LogStatus.ERROR
+        log_entry.error_message = str(e)
+        await session.commit()
+        await session.refresh(log_entry)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to enqueue parsing task",
+        )
 
     return BlackboxLogResponse.model_validate(log_entry)
 
