@@ -41,6 +41,14 @@ async def upload_log(
             detail="No file name provided",
         )
 
+    # Validate file extension
+    filename_lower = file.filename.strip().lower()
+    if not filename_lower.endswith('.bbl'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type: expected .BBL",
+        )
+
     # Verify drone exists
     from app.models import Drone
 
@@ -53,9 +61,6 @@ async def upload_log(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Drone with ID {drone_id} not found",
         )
-
-    # Read file content
-    content = await file.read()
 
     # TODO: Upload to MinIO
     # For now, just create the log entry with pending status
