@@ -1,0 +1,78 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.venv
+venv/
+ENV/
+env/
+.venv/
+.venv_*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Node & Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+dist/
+build/
+coverage/
+
+# Docker
+docker-compose.override.yml.local
+.docker/
+
+# Temp files
+*.tmp
+temp/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Lock files (optional - uncomment if you want to commit locks)
+# poetry.lock
+# yarn.lock
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+logs/
+*.log

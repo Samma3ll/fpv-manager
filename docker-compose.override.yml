@@ -1,0 +1,28 @@
+version: "3.9"
+
+# Development overrides for hot reload and faster iteration
+# This file is automatically merged with docker-compose.yml when using `docker compose up`
+
+services:
+  backend:
+    # Override command to enable auto-reload
+    command: >
+      uvicorn app.main:app 
+      --host 0.0.0.0 
+      --port 8000 
+      --reload
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "True"
+
+  frontend:
+    # Override build args for dev
+    build:
+      args:
+        VITE_API_URL: http://localhost:8000
+    # Override to use Vite dev server instead of nginx
+    command: npm run dev
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
