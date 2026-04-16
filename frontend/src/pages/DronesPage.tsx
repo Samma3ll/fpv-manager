@@ -6,6 +6,13 @@ import { client } from '../lib/api'
 import { formatShortDate } from '../lib/format'
 import type { BlackboxLog, Drone, DroneFormValues } from '../types'
 
+/**
+ * Render the Drones management page that lists drones, shows per-drone log statistics, and provides create, edit, and delete actions.
+ *
+ * Fetches drones and recent blackbox logs on mount, computes per-drone log counts and most recent flight dates, and refreshes data after create/update/delete operations. Displays an inline error on load failure, an empty-state when no drones exist, a grid of drone cards with specs and actions, and a DroneFormDialog for creating or editing a drone.
+ *
+ * @returns The page's JSX element containing the fleet UI and DroneFormDialog.
+ */
 export function DronesPage() {
   const [drones, setDrones] = useState<Drone[]>([])
   const [logs, setLogs] = useState<BlackboxLog[]>([])

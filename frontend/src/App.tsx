@@ -7,6 +7,16 @@ import { DronesPage } from './pages/DronesPage'
 import { LogDetailPage } from './pages/LogDetailPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
+/**
+ * Defines the application's client-side routing tree and layout.
+ *
+ * Renders a <Routes> tree wrapped by <AppShell> and registers the app's top-level routes:
+ * "/" → DashboardPage, "/drones" → DronesPage, "/drones/:droneId" → DroneDetailPage,
+ * "/logs/:logId" → LogDetailPage, "/compare" → ComparePage, "/home" → redirects to "/",
+ * and a wildcard "*" → NotFoundPage.
+ *
+ * @returns The JSX element containing the <Routes> tree with <AppShell> and nested route definitions.
+ */
 export function App() {
   return (
     <Routes>

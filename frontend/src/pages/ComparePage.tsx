@@ -11,6 +11,14 @@ interface ComparedLog {
   analyses: AnalysesResponse
 }
 
+/**
+ * Renders the Compare page which lets users pick up to four logs from a single drone and inspect their analyses.
+ *
+ * The component loads available drones, presents a drone selector and checkboxes for logs, fetches and pairs
+ * analyses for selected logs (capped to four), and displays a tune-score summary and an FFT roll overlay when available.
+ *
+ * @returns The React element for the compare workspace UI.
+ */
 export function ComparePage() {
   const [drones, setDrones] = useState<Drone[]>([])
   const [logs, setLogs] = useState<BlackboxLog[]>([])

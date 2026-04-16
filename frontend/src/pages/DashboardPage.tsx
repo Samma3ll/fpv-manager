@@ -6,6 +6,13 @@ import { client } from '../lib/api'
 import { formatShortDate } from '../lib/format'
 import type { BlackboxLog, Drone } from '../types'
 
+/**
+ * Dashboard page that loads and displays tracked drones and recent logs.
+ *
+ * Fetches drones and up to 100 logs when mounted, manages loading and error state, and renders stats (tracked drones, ready/queued/failed logs), navigation actions, and a recent-activity list showing up to 6 recent logs.
+ *
+ * @returns The dashboard page's JSX element containing stats, actions, and recent activity
+ */
 export function DashboardPage() {
   const [drones, setDrones] = useState<Drone[]>([])
   const [logs, setLogs] = useState<BlackboxLog[]>([])

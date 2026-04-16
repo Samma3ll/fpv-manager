@@ -16,14 +16,35 @@ const moduleTabs = [
   { key: 'tune_score', label: 'Summary Score' },
 ]
 
+/**
+ * Determines whether a value can be treated as `AxisMetrics` by checking that it is a non-null object.
+ *
+ * @param value - The value to test
+ * @returns `true` if `value` is a non-null object and can be considered `AxisMetrics`, `false` otherwise.
+ */
 function isAxisMetrics(value: unknown): value is AxisMetrics {
   return Boolean(value) && typeof value === 'object'
 }
 
+/**
+ * Determines which of 'roll', 'pitch', and 'yaw' keys exist in the given result object.
+ *
+ * @param result - Object potentially containing per-axis analysis results
+ * @returns The list of axis names present from ['roll', 'pitch', 'yaw'] in that order
+ */
 function axisNames(result: Record<string, unknown>) {
   return ['roll', 'pitch', 'yaw'].filter((axis) => axis in result)
 }
 
+/**
+ * Page component that displays a log's metadata and available analysis results.
+ *
+ * Loads the log and its analyses using the `logId` route parameter, exposes UI for
+ * selecting analysis tabs (step response, FFT noise, PID error, motor analysis, tune score),
+ * and polls the server every 5 seconds while the log status is `pending` or `processing`.
+ *
+ * @returns The rendered React element for the log detail page containing the overview card and analysis tabs.
+ */
 export function LogDetailPage() {
   const params = useParams()
   const logId = Number(params.logId)

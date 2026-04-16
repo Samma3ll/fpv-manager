@@ -1,5 +1,16 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
+/**
+ * Render a breadcrumb navigation bar derived from the current location pathname.
+ *
+ * The pathname is split into segments; each segment is converted to a display label
+ * (hyphens replaced with spaces; numeric segments rendered as `Drone <id>` or
+ * `Log <id>` when the previous segment is `logs`) and capitalized. The component
+ * returns a <nav aria-label="Breadcrumbs"> containing a static "Control Room" prefix
+ * followed by a sequence of `/ {label}` spans for each path segment.
+ *
+ * @returns The breadcrumb navigation JSX element
+ */
 function Breadcrumbs() {
   const location = useLocation()
   const parts = location.pathname.split('/').filter(Boolean)
@@ -33,6 +44,15 @@ const navigation = [
   { to: '/compare', label: 'Compare' },
 ]
 
+/**
+ * Render the application's main shell including a left sidebar and a main content area.
+ *
+ * The sidebar contains branding, the primary navigation links, and a short note. The main
+ * area includes a top bar with breadcrumbs and a page heading, followed by the route
+ * outlet for nested content.
+ *
+ * @returns The root JSX element for the app layout: a sidebar with brand and navigation, and a main content area with topbar and routed content.
+ */
 export function AppShell() {
   return (
     <div className="shell">

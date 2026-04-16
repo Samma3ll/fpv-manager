@@ -1,5 +1,10 @@
 import { Link } from 'react-router-dom'
 
+/**
+ * Render a "Route not found" page with a heading, explanatory note, and a link back to the overview.
+ *
+ * @returns A JSX element containing a section with the "Route not found" heading, a muted paragraph explaining the view is not present, and a link button that navigates to the root ("/").
+ */
 export function NotFoundPage() {
   return (
     <section className="section-card">

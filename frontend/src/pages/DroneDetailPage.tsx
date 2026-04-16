@@ -12,6 +12,17 @@ interface UploadProgressItem {
   percent: number
 }
 
+/**
+ * Render the drone detail page including header, upload area, and per-flight logs.
+ *
+ * Loads drone metadata and associated blackbox logs (based on route `droneId`), displays
+ * summary statistics, provides a dropzone and file selector for uploading `.bbl` files with
+ * per-file progress, and renders a logs table that supports inline editing of notes/tags
+ * and deletion of individual logs. When any log is in `pending` or `processing` status,
+ * the page polls for updates every 5 seconds until those statuses clear.
+ *
+ * @returns The JSX element for the Drone detail page.
+ */
 export function DroneDetailPage() {
   const params = useParams()
   const navigate = useNavigate()

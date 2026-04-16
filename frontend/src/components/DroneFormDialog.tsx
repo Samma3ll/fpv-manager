@@ -18,6 +18,12 @@ const emptyForm: DroneFormValues = {
   notes: '',
 }
 
+/**
+ * Convert a `Drone` (if provided) into `DroneFormValues` suitable for populating the form.
+ *
+ * @param drone - Optional `Drone` to convert; if omitted or `null`, returns the empty form values.
+ * @returns `DroneFormValues` with each field mapped from `drone`; missing text fields become empty strings and numeric fields (`motor_kv`, `weight_g`) are converted to strings.
+ */
 function toFormValues(drone?: Drone | null): DroneFormValues {
   if (!drone) {
     return emptyForm
@@ -34,6 +40,19 @@ function toFormValues(drone?: Drone | null): DroneFormValues {
   }
 }
 
+/**
+ * Render a modal form for creating or editing a drone profile.
+ *
+ * Renders form fields bound to internal state, handles input changes, and submits
+ * normalized form values to the provided submit callback. The dialog can be
+ * closed via the backdrop, Cancel/Close buttons, or after a successful submit.
+ *
+ * @param open - Whether the dialog is visible
+ * @param drone - Optional drone to populate the form for editing; if omitted the form is empty for creation
+ * @param onClose - Callback invoked to close the dialog
+ * @param onSubmit - Callback invoked with the form values to persist; form submission will close the dialog on success and display an error message on failure
+ * @returns The dialog element when `open` is true, otherwise `null`
+ */
 export function DroneFormDialog({ open, drone, onClose, onSubmit }: DroneFormDialogProps) {
   const [values, setValues] = useState<DroneFormValues>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
