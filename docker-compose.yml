@@ -48,7 +48,6 @@ services:
       - "9001:9001"    # MinIO Console
     volumes:
       - minio_data:/minio_data
-      - ./scripts/minio-init.sh:/docker-entrypoint-extra-initdb.d/init-buckets.sh
     command: server /minio_data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]

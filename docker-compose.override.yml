@@ -2,18 +2,36 @@
 # This file is automatically merged with docker-compose.yml when using `docker compose up`
 
 services:
+  minio-init:
+    image: minio/mc:latest
+    container_name: fpv_minio_init
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set minio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      /usr/bin/mc mb --ignore-existing minio/blackbox-logs;
+      /usr/bin/mc mb --ignore-existing minio/assets;
+      /usr/bin/mc mb --ignore-existing minio/processed;
+      echo 'MinIO buckets initialized'
+      "
+    networks:
+      - fpv-network
+    restart: no
+
   backend:
     # Override command to enable auto-reload
-    # The entrypoint already runs migrations, here we just pass --reload
-    command: 
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "8000"
-      - "--reload"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       ENVIRONMENT: development
       DEBUG: "True"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
 
   frontend:
     # Use development Dockerfile for Vite dev server with hot reload

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 5 - Log Parsing Worker ✅
+- **Step Response Analysis**: Measures roll/pitch/yaw response characteristics
+  - Rise time: Time to reach 90% of steady state
+  - Overshoot: Peak value exceeding steady state (%)
+  - Settling time: Time to stabilize within 2% band
+  - Ringing: Post-settling oscillations count
+- **FFT Noise Analysis**: Frequency domain analysis with scipy
+  - Power spectral density computation
+  - Resonance peak detection (top 10 peaks)
+  - Energy distribution across frequency bands (5-50Hz, 50-100Hz, 100-250Hz, 250-500Hz)
+  - Dominant frequency identification
+  - Noise floor calculation
+- **PID Error Tracking**: Control error measurement
+  - RMS error, max error, mean absolute error
+  - Error statistics (mean, std, percentiles)
+  - Error drift detection (trend over flight)
+  - Error derivative RMS
+- **Motor Output Analysis**: Motor performance evaluation
+  - Per-motor statistics (min/max/avg/RMS)
+  - Motor imbalance percentage
+  - Motor correlation matrix (synchronization)
+  - Motor output deviation from ideal
+  - Resonance peaks across motors
+- **Tune Quality Scoring**: Overall PID tuning assessment (0-100)
+  - Weighted scoring: 35% step response, 25% FFT noise, 40% PID error
+  - Step response scoring: rise time, overshoot, settling time, ringing penalties
+  - FFT scoring: resonance peaks, noise floor, energy distribution
+  - PID error scoring: RMS error, max error, drift
+  - Motor balance penalty (up to 20%)
+- **Analysis Orchestration**: `run_all_analyses()` task automatically triggered after log parsing
+  - Coordinates all 5 analyzers
+  - Stores results in LogAnalysis table by module
+  - Calculated and stored tune score for quick access
+- **Analysis API Endpoints**:
+  - `GET /api/v1/logs/{log_id}/analyses` - All analyses for a log
+  - `GET /api/v1/logs/{log_id}/analyses/{module}` - Specific module results
+- **Module Registry**: Database module registration for Phase 7 modularity
+  - All 5 analysis modules registered as enabled
+  - Migration: 003_add_analysis_modules.py
+- **Celery Tasks**: Individual analysis task endpoints for modularity
+  - `analyze_log_step_response()`, `analyze_log_fft()`, `analyze_log_pid_error()`, `analyze_log_motor()`
+  - All tasks store results independently to LogAnalysis
+
 ### Phase 4 - Log Parsing Worker ✅
 - MinIO file storage integration for Betaflight log files (.BBL)
 - Celery async task triggering on file upload with priority queue
@@ -50,13 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-#### Phase 5 - Analysis Modules
-- Step response analysis
-- FFT noise analysis
-- PID error tracking
-- Motor output analysis
-- Tune quality scoring
-
 #### Phase 6 - Frontend UI
 - Drone management (CRUD)
 - Log management and upload
@@ -64,8 +100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comparison view
 
 #### Phase 7 - Modularity & Plugins
-- Module registry system
+- Module registry system (foundations ready)
 - Plugin architecture for future extensibility
+- Enable/disable modules dynamically
+- Custom analysis modules
 
 #### Phase 8 - Docker & Deployment
 - Production-ready Docker configuration
