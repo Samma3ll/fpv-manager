@@ -10,23 +10,69 @@ import os
 logger = logging.getLogger(__name__)
 
 
+class ParserContextManager:
+    """
+    Context manager for loading an orangebox.Parser from file content.
+
+    The parser reads frames lazily, so the temporary file must remain available
+    during the entire analysis. This context manager ensures the temp file is
+    deleted only after the parser is no longer needed.
+    """
+
+    def __init__(self, file_content: bytes):
+        self.file_content = file_content
+        self.temp_path = None
+        self.parser = None
+
+    def __enter__(self):
+        from orangebox import Parser
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.bbl') as tmp:
+            tmp.write(self.file_content)
+            self.temp_path = tmp.name
+
+        # Load parser (lazily reads frames)
+        self.parser = Parser.load(self.temp_path)
+        return self.parser
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Clean up temporary file
+        if self.temp_path and os.path.exists(self.temp_path):
+            try:
+                os.remove(self.temp_path)
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {self.temp_path}: {e}")
+        return False
+
+
 def load_parser_from_file_content(file_content: bytes):
     """
     Load an orangebox.Parser from binary .bbl file content.
-    
+
+    WARNING: The returned parser reads frames lazily. To ensure the temporary
+    file remains available during analysis, use ParserContextManager instead:
+
+        with ParserContextManager(file_content) as parser:
+            # Use parser here
+            analyze_step_response(parser)
+
+    This legacy function is kept for backward compatibility but may cause
+    issues if the parser is used after the temp file is deleted.
+
     Parameters:
         file_content (bytes): Binary content of a .bbl file.
-    
+
     Returns:
         Parser: Loaded Parser instance.
     """
     from orangebox import Parser
-    
+
     # Parser.load() expects a file path, not BytesIO, so write to a temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.bbl') as tmp:
         tmp.write(file_content)
         temp_path = tmp.name
-    
+
     try:
         parser = Parser.load(temp_path)
         return parser
@@ -39,24 +85,74 @@ def load_parser_from_file_content(file_content: bytes):
                 logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
 
 
+def extract_fields(parser, field_names: List[str]) -> Dict[str, Optional[np.ndarray]]:
+    """
+    Extract multiple fields from a parser in a single pass over frames.
+
+    Parameters:
+        parser: Parser-like object exposing `field_names` (iterable of names) and `frames()` yielding frames with a `data` sequence.
+        field_names (List[str]): List of field names to extract.
+
+    Returns:
+        Dict[str, Optional[np.ndarray]]: Mapping from field name to array of values (or None if field not found or extraction failed).
+    """
+    result = {}
+
+    # Find indices for all requested fields
+    field_indices = {}
+    for field_name in field_names:
+        if field_name in parser.field_names:
+            field_indices[field_name] = parser.field_names.index(field_name)
+        else:
+            logger.warning(f"Field '{field_name}' not found in parser")
+            result[field_name] = None
+
+    if not field_indices:
+        return result
+
+    # Initialize data lists
+    data_lists = {field_name: [] for field_name in field_indices.keys()}
+
+    try:
+        # Single pass over frames
+        for frame in parser.frames():
+            for field_name, field_idx in field_indices.items():
+                data_lists[field_name].append(frame.data[field_idx])
+
+        # Convert to numpy arrays
+        for field_name, data_list in data_lists.items():
+            result[field_name] = np.array(data_list, dtype=np.float64)
+
+    except Exception as e:
+        logger.error(f"Error extracting fields: {e}")
+        for field_name in field_indices.keys():
+            if field_name not in result:
+                result[field_name] = None
+
+    return result
+
+
 def extract_field_data(parser, field_name: str) -> Optional[np.ndarray]:
     """
     Extract a named field from a parser and return its values as a NumPy array.
-    
+
+    Note: For extracting multiple fields, prefer extract_fields() which does
+    a single pass over frames instead of multiple passes.
+
     Parameters:
         parser: Parser-like object exposing `field_names` (iterable of names) and `frames()` yielding frames with a `data` sequence.
         field_name (str): Name of the field to extract.
-    
+
     Returns:
         np.ndarray: Array of the field values with dtype `float64`, or `None` if the field is not present or extraction fails.
     """
     if field_name not in parser.field_names:
         logger.warning(f"Field '{field_name}' not found in parser")
         return None
-    
+
     field_idx = parser.field_names.index(field_name)
     data = []
-    
+
     try:
         for frame in parser.frames():
             data.append(frame.data[field_idx])

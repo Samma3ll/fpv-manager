@@ -57,7 +57,7 @@ def analyze_fft_noise(parser) -> Dict[str, Any]:
             continue
         
         try:
-            axis_result = _analyze_axis_fft(gyro_data, dt, axis=axis_name)
+            axis_result = _analyze_axis_fft(gyro_data, fs, axis=axis_name)
             result[axis_name] = axis_result
         except Exception as e:
             logger.error(f"Error analyzing {axis_name} FFT: {e}")

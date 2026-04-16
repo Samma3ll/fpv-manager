@@ -133,12 +133,14 @@ def _analyze_axis_response(
         # Analyze this step
         step_data = gyro_data[start_idx:end_idx]
         step_result = _analyze_single_step(step_data, dt)
-        
+
         if step_result and "rise_time_ms" in step_result:
             steps_analysis.append(step_result)
-        
+
         # Skip ahead to avoid overlapping steps
-        i += max(1, min_step_spacing // int(0.5 / dt))
+        threshold_idx = start_idx + min_step_spacing
+        while i < len(step_indices) and step_indices[i] <= threshold_idx:
+            i += 1
     
     if not steps_analysis:
         # Return overall statistics if no clear steps found
@@ -174,21 +176,27 @@ def _analyze_single_step(step_signal: np.ndarray, dt: float) -> Dict[str, Any]:
     """
     # Normalize to get response characteristics
     signal_normalized = normalize_signal(step_signal)
-    
+
     # Find steady-state value (last 20% of signal)
     steady_state = np.mean(signal_normalized[-int(0.2 * len(signal_normalized)):])
-    
-    # Rise time: time to reach 90% of steady state
-    threshold_90 = 0.9 * steady_state
-    rise_indices = np.where(np.abs(signal_normalized) > threshold_90)[0]
+
+    # Rise time: time to reach 90% of steady state (sign-aware)
+    target_90 = 0.9 * steady_state
+    if steady_state >= 0:
+        rise_indices = np.where(signal_normalized >= target_90)[0]
+    else:
+        rise_indices = np.where(signal_normalized <= target_90)[0]
     rise_time_ms = float(rise_indices[0] * dt * 1000) if len(rise_indices) > 0 else 0.0
-    
-    # Overshoot: peak value minus steady state
+
+    # Overshoot: peak value minus steady state (protect against near-zero steady state)
     peak_value = np.max(signal_normalized)
-    overshoot_pct = max(0.0, (peak_value - steady_state) / steady_state * 100 if steady_state != 0 else 0.0)
-    
+    if abs(steady_state) < 1e-8:
+        overshoot_pct = 0.0
+    else:
+        overshoot_pct = max(0.0, (peak_value - steady_state) / abs(steady_state) * 100)
+
     # Settling time: time to settle within 2% of steady state
-    settling_band = 0.02 * steady_state if steady_state != 0 else 0.02
+    settling_band = 0.02 * abs(steady_state)
     settled_indices = np.where(np.abs(signal_normalized - steady_state) < settling_band)[0]
     
     settling_time_ms = 0.0

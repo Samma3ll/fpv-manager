@@ -27,11 +27,12 @@ def upgrade() -> None:
         ('pid_error', 'PID Error Tracking', 'Measure PID control error: RMS, max error, error drift, percentiles', true, 'analysis', '{}', NOW()),
         ('motor_analysis', 'Motor Output Analysis', 'Analyze motor performance: balance, imbalance, resonance, synchronization', true, 'analysis', '{}', NOW()),
         ('tune_score', 'Tune Quality Score', 'Overall PID tune quality score (0-100) based on all analyses', true, 'analysis', '{}', NOW())
+        ON CONFLICT (name) DO NOTHING
     """)
 
 
 def downgrade() -> None:
     """Remove analysis modules from registry."""
     op.execute(
-        "DELETE FROM modules WHERE name IN ('step_response', 'fft_noise', 'pid_error', 'motor_analysis', 'tune_score')"
+        "DELETE FROM modules WHERE name IN ('step_response', 'fft_noise', 'pid_error', 'motor_analysis', 'tune_score') AND module_type = 'analysis'"
     )

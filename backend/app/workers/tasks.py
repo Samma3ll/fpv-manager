@@ -117,11 +117,11 @@ def parse_blackbox_log(self, log_id: int):
                 
                 logger.info(f"Created temporary file for parsing: {temp_file}")
                 parser = Parser.load(temp_file)
-                logger.info(f"Successfully loaded and parsed log from temporary file")
+                logger.info("Successfully loaded and parsed log from temporary file")
 
                 # Extract metadata from headers
                 headers = parser.headers
-                logger.info(f"Extracted headers from log")
+                logger.info("Extracted headers from log")
 
                 # Extract firmware version and craft name
                 log_entry.betaflight_version = headers.get("Firmware revision", None)
@@ -226,7 +226,7 @@ def parse_blackbox_log(self, log_id: int):
             raise self.retry(exc=e, countdown=60)
 
 
-@shared_task(bind=True, name="run_all_analyses")
+@shared_task(bind=True, name="run_all_analyses", max_retries=3)
 def run_all_analyses(self, log_id: int):
     """
     Run all configured analyses for a BlackboxLog and persist their sanitized results.
@@ -348,52 +348,79 @@ def run_all_analyses(self, log_id: int):
             
         except Exception as e:
             logger.error(f"Error running analyses for log {log_id}: {e}", exc_info=True)
-            return {
-                "log_id": log_id,
-                "status": "error",
-                "error": str(e),
-            }
+
+            # Roll back session
+            try:
+                session.rollback()
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback session: {rollback_error}")
+
+            # Update log status to analysis error
+            try:
+                result = session.execute(
+                    select(BlackboxLog).where(BlackboxLog.id == log_id)
+                )
+                log_entry = result.scalar_one_or_none()
+                if log_entry:
+                    log_entry.error_message = f"Analysis failed: {str(e)[:255]}"
+                    # Note: BlackboxLog doesn't have an ANALYSIS_ERROR status,
+                    # so we keep it as is or use ERROR if appropriate
+                    session.commit()
+            except Exception as update_error:
+                logger.error(f"Failed to update log error status: {update_error}")
+
+            # Retry with exponential backoff
+            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
 
 
 @shared_task(bind=True, name="analyze_log_step_response")
 def analyze_log_step_response(self, log_id: int):
     """
     Run step-response analysis for a BlackboxLog and persist the result.
-    
+
     Downloads the log file for the given BlackboxLog id, constructs a parser, runs the step-response analysis, stores the analysis output in the LogAnalysis table under module "step_response", and returns a summary of the operation.
-    
+
     Parameters:
         log_id (int): ID of the BlackboxLog to analyze.
-    
+
     Returns:
         dict: Summary containing at minimum `log_id`, `module` ("step_response"), and `status` ("success" or "error"). On error, includes an `error` string with the exception message.
     """
     logger.info(f"Analyzing step response for log {log_id}")
-    
+
     session_factory = get_sync_session_factory()
     with session_factory() as session:
         result = session.execute(
             select(BlackboxLog).where(BlackboxLog.id == log_id)
         )
         log_entry = result.scalar_one_or_none()
-        
+
         if not log_entry:
             logger.error(f"Log entry {log_id} not found")
             return {"log_id": log_id, "status": "error"}
-        
+
         try:
             file_content = minio_client.download_file(
                 bucket=minio_client.bucket_blackbox,
                 object_name=log_entry.file_path,
             )
-            
+
             from app.analysis.utils import load_parser_from_file_content
             from app.analysis.step_response import analyze_step_response
             from app.models import LogAnalysis
-            
+            from sqlalchemy import delete
+
             parser = load_parser_from_file_content(file_content)
             analysis_result = analyze_step_response(parser)
-            
+
+            # Delete existing analysis for this module
+            session.execute(
+                delete(LogAnalysis).where(
+                    LogAnalysis.log_id == log_id,
+                    LogAnalysis.module == "step_response"
+                )
+            )
+
             # Store result
             analysis = LogAnalysis(
                 log_id=log_id,
@@ -402,7 +429,7 @@ def analyze_log_step_response(self, log_id: int):
             )
             session.add(analysis)
             session.commit()
-            
+
             return {
                 "log_id": log_id,
                 "module": "step_response",
@@ -422,7 +449,7 @@ def analyze_log_step_response(self, log_id: int):
 def analyze_log_fft(self, log_id: int):
     """
     Run FFT noise analysis for the specified blackbox log and persist the result.
-    
+
     Returns:
         dict: Summary of the operation containing:
             - `log_id` (int): The analyzed log id.
@@ -431,31 +458,40 @@ def analyze_log_fft(self, log_id: int):
             - `error` (str, optional): Error message present when `status` is `"error"`.
     """
     logger.info(f"Analyzing FFT for log {log_id}")
-    
+
     session_factory = get_sync_session_factory()
     with session_factory() as session:
         result = session.execute(
             select(BlackboxLog).where(BlackboxLog.id == log_id)
         )
         log_entry = result.scalar_one_or_none()
-        
+
         if not log_entry:
             logger.error(f"Log entry {log_id} not found")
             return {"log_id": log_id, "status": "error"}
-        
+
         try:
             file_content = minio_client.download_file(
                 bucket=minio_client.bucket_blackbox,
                 object_name=log_entry.file_path,
             )
-            
+
             from app.analysis.utils import load_parser_from_file_content
             from app.analysis.fft_noise import analyze_fft_noise
             from app.models import LogAnalysis
-            
+            from sqlalchemy import delete
+
             parser = load_parser_from_file_content(file_content)
             analysis_result = analyze_fft_noise(parser)
-            
+
+            # Delete existing analysis for this module
+            session.execute(
+                delete(LogAnalysis).where(
+                    LogAnalysis.log_id == log_id,
+                    LogAnalysis.module == "fft_noise"
+                )
+            )
+
             # Store result
             analysis = LogAnalysis(
                 log_id=log_id,
@@ -464,7 +500,7 @@ def analyze_log_fft(self, log_id: int):
             )
             session.add(analysis)
             session.commit()
-            
+
             return {
                 "log_id": log_id,
                 "module": "fft_noise",
@@ -484,39 +520,48 @@ def analyze_log_fft(self, log_id: int):
 def analyze_log_pid_error(self, log_id: int):
     """
     Run PID error analysis for the blackbox log identified by log_id and persist the result as a LogAnalysis row.
-    
+
     Parameters:
         log_id (int): ID of the BlackboxLog to analyze.
-    
+
     Returns:
         dict: Summary including `log_id`, `module` (set to `"pid_error"`), and `status` (`"success"` or `"error"`). On error includes an `error` key with the exception message.
     """
     logger.info(f"Analyzing PID error for log {log_id}")
-    
+
     session_factory = get_sync_session_factory()
     with session_factory() as session:
         result = session.execute(
             select(BlackboxLog).where(BlackboxLog.id == log_id)
         )
         log_entry = result.scalar_one_or_none()
-        
+
         if not log_entry:
             logger.error(f"Log entry {log_id} not found")
             return {"log_id": log_id, "status": "error"}
-        
+
         try:
             file_content = minio_client.download_file(
                 bucket=minio_client.bucket_blackbox,
                 object_name=log_entry.file_path,
             )
-            
+
             from app.analysis.utils import load_parser_from_file_content
             from app.analysis.pid_error import analyze_pid_error
             from app.models import LogAnalysis
-            
+            from sqlalchemy import delete
+
             parser = load_parser_from_file_content(file_content)
             analysis_result = analyze_pid_error(parser)
-            
+
+            # Delete existing analysis for this module
+            session.execute(
+                delete(LogAnalysis).where(
+                    LogAnalysis.log_id == log_id,
+                    LogAnalysis.module == "pid_error"
+                )
+            )
+
             # Store result
             analysis = LogAnalysis(
                 log_id=log_id,
@@ -525,7 +570,7 @@ def analyze_log_pid_error(self, log_id: int):
             )
             session.add(analysis)
             session.commit()
-            
+
             return {
                 "log_id": log_id,
                 "module": "pid_error",
@@ -545,43 +590,52 @@ def analyze_log_pid_error(self, log_id: int):
 def analyze_log_motor(self, log_id: int):
     """
     Run motor-output analysis for a blackbox log and persist the result.
-    
+
     Downloads the log file, constructs a parser, executes the motor-output analysis, and stores the analysis JSON in the `LogAnalysis` table with module name `"motor_analysis"`.
-    
+
     Parameters:
         log_id (int): Primary key of the BlackboxLog entry to analyze.
-    
+
     Returns:
         dict: On success: `{"log_id": log_id, "module": "motor_analysis", "status": "success"}`.
               If the log entry is not found: `{"log_id": log_id, "status": "error"}`.
               On analysis or storage failure: `{"log_id": log_id, "module": "motor_analysis", "status": "error", "error": <error message>}`.
     """
     logger.info(f"Analyzing motor output for log {log_id}")
-    
+
     session_factory = get_sync_session_factory()
     with session_factory() as session:
         result = session.execute(
             select(BlackboxLog).where(BlackboxLog.id == log_id)
         )
         log_entry = result.scalar_one_or_none()
-        
+
         if not log_entry:
             logger.error(f"Log entry {log_id} not found")
             return {"log_id": log_id, "status": "error"}
-        
+
         try:
             file_content = minio_client.download_file(
                 bucket=minio_client.bucket_blackbox,
                 object_name=log_entry.file_path,
             )
-            
+
             from app.analysis.utils import load_parser_from_file_content
             from app.analysis.motor_analysis import analyze_motor_output
             from app.models import LogAnalysis
-            
+            from sqlalchemy import delete
+
             parser = load_parser_from_file_content(file_content)
             analysis_result = analyze_motor_output(parser)
-            
+
+            # Delete existing analysis for this module
+            session.execute(
+                delete(LogAnalysis).where(
+                    LogAnalysis.log_id == log_id,
+                    LogAnalysis.module == "motor_analysis"
+                )
+            )
+
             # Store result
             analysis = LogAnalysis(
                 log_id=log_id,
@@ -590,7 +644,7 @@ def analyze_log_motor(self, log_id: int):
             )
             session.add(analysis)
             session.commit()
-            
+
             return {
                 "log_id": log_id,
                 "module": "motor_analysis",

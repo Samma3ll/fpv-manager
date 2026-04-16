@@ -65,7 +65,7 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
     # Analyze overall characteristics
     if len(motor_data_list) >= 2:
         try:
-            overall = _analyze_overall_motors(motor_data_list)
+            overall = _analyze_overall_motors(motor_data_list, parser)
             result["overall"] = overall
         except Exception as e:
             logger.error(f"Error analyzing overall motors: {e}")
@@ -147,13 +147,14 @@ def _analyze_motor(motor_data: np.ndarray, motor_idx: int) -> Dict[str, Any]:
     return result
 
 
-def _analyze_overall_motors(motor_data_list: List[tuple]) -> Dict[str, Any]:
+def _analyze_overall_motors(motor_data_list: List[tuple], parser) -> Dict[str, Any]:
     """
     Compute cross-motor balance and synchronization metrics from multiple motor time series.
-    
+
     Parameters:
         motor_data_list (List[tuple]): List of (motor_index, motor_data) tuples where `motor_data` is a 1-D numeric array or sequence for that motor.
-    
+        parser: Parser instance to derive sampling frequency for resonance detection.
+
     Returns:
         dict: Analysis results containing:
             - imbalance_pct (float): Coefficient of variation of per-motor means expressed as a percentage.
@@ -163,24 +164,24 @@ def _analyze_overall_motors(motor_data_list: List[tuple]) -> Dict[str, Any]:
             - potential_resonance_peaks (List[float]): Frequencies (Hz) of resonance peaks commonly observed across motors.
     """
     result = {}
-    
+
     if len(motor_data_list) < 2:
         return result
-    
+
     # Calculate average output across all motors for each sample
-    min_len = min(len(data) for _, data in motor_data_list)
-    motor_means = np.array([np.mean(data[:min_len]) for _, data in motor_data_list])
-    motor_stds = np.array([np.std(data[:min_len]) for _, data in motor_data_list])
-    
+    global_min_len = min(len(data) for _, data in motor_data_list)
+    motor_means = np.array([np.mean(data[:global_min_len]) for _, data in motor_data_list])
+    motor_stds = np.array([np.std(data[:global_min_len]) for _, data in motor_data_list])
+
     # Motor imbalance: coefficient of variation
     overall_mean = np.mean(motor_means)
     if overall_mean > 0:
         imbalance = float(np.std(motor_means) / overall_mean * 100)
     else:
         imbalance = 0.0
-    
+
     result["imbalance_pct"] = imbalance
-    
+
     # Check for motor synchronization
     # Calculate correlation between motor outputs
     if len(motor_data_list) == 4:
@@ -189,62 +190,75 @@ def _analyze_overall_motors(motor_data_list: List[tuple]) -> Dict[str, Any]:
             for j in range(i + 1, 4):
                 _, data_i = motor_data_list[i]
                 _, data_j = motor_data_list[j]
-                
-                min_len = min(len(data_i), len(data_j))
-                if min_len > 0:
-                    corr = float(np.corrcoef(data_i[:min_len], data_j[:min_len])[0, 1])
+
+                pair_min_len = min(len(data_i), len(data_j))
+                if pair_min_len > 0:
+                    corr = float(np.corrcoef(data_i[:pair_min_len], data_j[:pair_min_len])[0, 1])
                     correlations.append(corr)
-        
+
         if correlations:
             result["motor_correlation_mean"] = float(np.mean(correlations))
             result["motor_correlation_min"] = float(np.min(correlations))
             result["motor_correlation_max"] = float(np.max(correlations))
-    
+
     # Output deviation from ideal
     # Ideal: all motors at same level
     deviations = []
     for _, motor_data in motor_data_list:
-        min_len = min(len(motor_data), min_len)
-        deviation = np.mean(motor_data[:min_len]) - overall_mean
+        deviation = np.mean(motor_data[:global_min_len]) - overall_mean
         deviations.append(deviation)
-    
+
     result["motor_deviations"] = [float(d) for d in deviations]
     result["max_deviation"] = float(max(np.abs(deviations)))
     
     # Resonance in motor outputs
     # Check if there are common frequency peaks across motors
-    resonance_peaks = _find_motor_resonances(motor_data_list)
+    resonance_peaks = _find_motor_resonances(motor_data_list, parser)
     result["potential_resonance_peaks"] = resonance_peaks
-    
+
     return result
 
 
-def _find_motor_resonances(motor_data_list: List[tuple], fs: float = 8000) -> List[float]:
+def _find_motor_resonances(motor_data_list: List[tuple], parser) -> List[float]:
     """
     Identify frequency peaks that appear across multiple motors' output spectra.
-    
+
     Parameters:
         motor_data_list (List[tuple]): Iterable of (motor_idx, motor_data) where `motor_data` is a 1-D numeric sequence of time-domain samples for that motor.
-        fs (float): Sampling frequency in Hz used to compute frequency bins (default 8000).
-    
+        parser: Parser instance to derive time array and compute sampling frequency.
+
     Returns:
         List[float]: Sorted list of candidate resonant frequencies in Hz (typically within 10–500 Hz). Returns an empty list if fewer than two motors provide valid data or if analysis fails.
     """
     try:
         from scipy import signal as scipy_signal
-        
+        from .utils import get_time_array
+
         resonances = []
-        
+
         if len(motor_data_list) < 2:
             return resonances
-        
+
+        # Derive sampling frequency from time array
+        time_array = get_time_array(parser)
+        if time_array is None or len(time_array) < 2:
+            logger.warning("Cannot compute sampling frequency: no valid time data")
+            return resonances
+
+        dt = np.median(np.diff(time_array))
+        if dt <= 0:
+            logger.warning("Invalid time step for sampling frequency")
+            return resonances
+
+        fs = 1.0 / dt
+
         # Get FFT for each motor
         peak_freqs_all = []
-        
+
         for _, motor_data in motor_data_list:
             if len(motor_data) < 10:
                 continue
-            
+
             # FFT
             fft_result = np.fft.rfft(motor_data - np.mean(motor_data))
             freqs = np.fft.rfftfreq(len(motor_data), 1.0 / fs)
@@ -261,15 +275,30 @@ def _find_motor_resonances(motor_data_list: List[tuple], fs: float = 8000) -> Li
         # Find common peaks (frequencies that appear in multiple motors)
         if len(peak_freqs_all) >= 2:
             # Use histogram to find common frequencies
+            from collections import Counter
+
             all_peaks = np.concatenate(peak_freqs_all)
             hist, bin_edges = np.histogram(all_peaks, bins=50)
-            
-            # Find bins with peaks from multiple motors
-            for i in range(len(hist)):
-                if hist[i] >= len(peak_freqs_all) // 2:  # At least half the motors
-                    freq = (bin_edges[i] + bin_edges[i + 1]) / 2
+
+            # Count per-motor presence in each bin
+            bin_votes = Counter()
+            for peak_freqs in peak_freqs_all:
+                # Digitize this motor's peaks into bins
+                motor_bins = np.digitize(peak_freqs, bin_edges)
+                # Record which bins this motor occupies (as a set to avoid double-counting)
+                per_motor_bins = set(motor_bins)
+                for b in per_motor_bins:
+                    if 1 <= b <= len(hist):  # Valid bin index
+                        bin_votes[b] += 1
+
+            # Append resonances for bins that meet the threshold
+            threshold = max(2, len(peak_freqs_all) // 2)
+            for b, count in bin_votes.items():
+                if count >= threshold:
+                    # Compute bin center frequency
+                    freq = (bin_edges[b - 1] + bin_edges[b]) / 2
                     resonances.append(float(freq))
-        
+
         return sorted(resonances)
     
     except Exception as e:

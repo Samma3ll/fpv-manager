@@ -27,5 +27,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run migrations and start server
-CMD sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+# Use exec form to make uvicorn PID 1
+# Note: Run migrations separately via docker-entrypoint or init container
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

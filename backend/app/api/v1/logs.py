@@ -269,14 +269,16 @@ async def get_log_analyses(
 ) -> dict:
     """
     Retrieve all persisted analysis results for a BlackboxLog.
-    
+
     Returns a dictionary keyed by analysis module name. Each value is a dict containing:
     - `module` (str): analysis module name
     - `result` (Any): parsed analysis payload from `result_json`
     - `created_at` (str): ISO 8601 timestamp when the analysis was created
-    
+
+    Returns an empty dictionary if no analyses exist yet (e.g., analyses are in-flight).
+
     Raises:
-        HTTPException: 404 if the log does not exist or if no analyses are found for the log.
+        HTTPException: 404 if the log does not exist.
     """
     from app.models import LogAnalysis
     
@@ -295,13 +297,7 @@ async def get_log_analyses(
     analysis_query = select(LogAnalysis).where(LogAnalysis.log_id == log_id)
     analysis_result = await session.execute(analysis_query)
     analyses = analysis_result.scalars().all()
-    
-    if not analyses:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No analyses found for log {log_id}",
-        )
-    
+
     # Organize by module
     result = {}
     for analysis in analyses:
@@ -310,7 +306,7 @@ async def get_log_analyses(
             "result": analysis.result_json,
             "created_at": analysis.created_at.isoformat(),
         }
-    
+
     return result
 
 

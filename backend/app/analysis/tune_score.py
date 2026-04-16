@@ -121,35 +121,36 @@ def _score_axis(
 def _score_step_response(step_response: Dict[str, Any]) -> float:
     """
     Compute a 0–100 quality score for a step response based on rise time, overshoot, settling time, and ringing.
-    
-    Evaluates the provided step_response metrics to deduct penalties from an initial perfect score. If step_response contains an "error" key, a neutral score of 50.0 is returned. The following properties influence the score:
+
+    Evaluates the provided step_response metrics to deduct penalties from an initial perfect score. If step_response contains an "error" or "warning" key, a neutral score of 50.0 is returned. The following properties influence the score:
     - rise_time_ms: penalizes responses that are too fast or too slow relative to an ideal range.
     - overshoot_pct: penalizes excessive overshoot.
     - settling_time_ms: penalizes long settling times.
     - ringing: penalizes sustained oscillations.
     The final score is clamped to the range 0.0–100.0.
-    
+
     Parameters:
         step_response (Dict[str, Any]): Step response metrics dictionary containing optional keys
-            "rise_time_ms", "overshoot_pct", "settling_time_ms", "ringing", or an "error" key.
-    
+            "rise_time_ms", "overshoot_pct", "settling_time_ms", "ringing", or an "error"/"warning" key.
+
     Returns:
-        float: Quality score between 0.0 and 100.0; `50.0` if `step_response` contains an "error" key.
+        float: Quality score between 0.0 and 100.0; `50.0` if `step_response` contains an "error" or "warning" key.
     """
-    if "error" in step_response:
+    if "error" in step_response or "warning" in step_response:
         return 50.0  # Neutral score if data unavailable
-    
+
     score = 100.0
-    
+
     # Rise time: ideal 50-200ms
     rise_time = step_response.get("rise_time_ms", 0)
-    if rise_time < 50:
-        rise_penalty = (50 - rise_time) / 50 * 10  # Too fast
-    elif rise_time > 200:
-        rise_penalty = min(20, (rise_time - 200) / 100 * 20)  # Too slow
-    else:
-        rise_penalty = 0  # Ideal range
-    score -= rise_penalty
+    if rise_time > 0:
+        if rise_time < 50:
+            rise_penalty = (50 - rise_time) / 50 * 10  # Too fast
+        elif rise_time > 200:
+            rise_penalty = min(20, (rise_time - 200) / 100 * 20)  # Too slow
+        else:
+            rise_penalty = 0  # Ideal range
+        score -= rise_penalty
     
     # Overshoot: ideal < 5%
     overshoot = step_response.get("overshoot_pct", 0)
@@ -175,18 +176,18 @@ def _score_step_response(step_response: Dict[str, Any]) -> float:
 def _score_fft_noise(fft_noise: Dict[str, Any]) -> float:
     """
     Evaluate frequency-domain noise characteristics and produce a 0–100 quality score for FFT-based analysis.
-    
+
     Parameters:
         fft_noise (Dict[str, Any]): Frequency-domain analysis data. Expected keys:
-            - "error": optional; if present, a neutral score is returned.
+            - "error" or "warning": optional; if present, a neutral score is returned.
             - "peaks": optional list of peak dicts with "power_db".
             - "noise_floor": optional numeric noise floor.
             - "energy_bands": optional dict with keys like "5_50_hz" and "250_500_hz" for low/high band energies.
-    
+
     Returns:
-        float: A score between 0.0 and 100.0 where higher values indicate cleaner frequency-domain characteristics; returns 50.0 if `fft_noise` contains an "error" key.
+        float: A score between 0.0 and 100.0 where higher values indicate cleaner frequency-domain characteristics; returns 50.0 if `fft_noise` contains an "error" or "warning" key.
     """
-    if "error" in fft_noise:
+    if "error" in fft_noise or "warning" in fft_noise:
         return 50.0  # Neutral score
     
     score = 100.0
@@ -232,18 +233,18 @@ def _score_fft_noise(fft_noise: Dict[str, Any]) -> float:
 def _score_pid_error(pid_error: Dict[str, Any]) -> float:
     """
     Compute a 0–100 quality score describing PID tracking error for a single axis.
-    
+
     Parameters:
         pid_error (Dict[str, Any]): Analysis data for the axis. Recognized keys:
             - `rms_error` (float): root-mean-square of the control error (degrees/sec).
             - `max_error` (float): maximum observed error (degrees/sec).
             - `error_drift` (float): steady drift of the error.
-            If the dictionary contains an `"error"` key, a neutral score is returned.
-    
+            If the dictionary contains an `"error"` or `"warning"` key, a neutral score is returned.
+
     Returns:
-        float: Score between 0.0 and 100.0 where higher is better. `50.0` is returned when `pid_error` contains an `"error"` key.
+        float: Score between 0.0 and 100.0 where higher is better. `50.0` is returned when `pid_error` contains an `"error"` or `"warning"` key.
     """
-    if "error" in pid_error:
+    if "error" in pid_error or "warning" in pid_error:
         return 50.0  # Neutral score
     
     score = 100.0
