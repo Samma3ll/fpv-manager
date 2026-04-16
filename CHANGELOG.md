@@ -7,16 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 3 - Backend API (FastAPI) 🚀
+- Pydantic request/response schemas (DroneCreate, DroneUpdate, BlackboxLogCreate, etc.)
+- Drone CRUD endpoints (POST, GET, PATCH, DELETE)
+- BlackboxLog upload and retrieval endpoints
+- MinIO file storage integration
+- Database session dependency injection
+- API error handling and validation
+- OpenAPI/Swagger documentation
+
 ### Phase 2 - Database Schema & ORM ✅
 - SQLAlchemy models: Drone, BlackboxLog (with LogStatus enum), LogAnalysis, Module
 - Pydantic settings configuration (BaseSettings) for environment variables
-- Async SQLAlchemy engine with asyncpg driver
+- Async SQLAlchemy engine with asyncpg driver, lazy initialization
 - Alembic migration setup (env.py, script.py.mako, initial migration)
 - FastAPI entry point with lifespan events, health check endpoint, CORS middleware
-- Backend requirements.txt with all dependencies (FastAPI, SQLAlchemy, Alembic, etc.)
+- Celery worker with Redis broker/backend, task definitions
+- Backend requirements.txt with all dependencies (FastAPI, SQLAlchemy, Alembic, psycopg2-binary, Celery, etc.)
 - Updated Dockerfiles with healthchecks and proper layer caching
 - frontend/nginx.conf with API proxy routing (/api/ → backend:8000) and SPA support
 - .dockerignore files for backend, worker, frontend
+- All 6 services running and healthy (postgres, redis, minio, backend, worker, frontend)
 
 ### Planned
 
