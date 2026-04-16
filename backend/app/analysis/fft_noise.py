@@ -12,23 +12,22 @@ logger = logging.getLogger(__name__)
 
 def analyze_fft_noise(parser) -> Dict[str, Any]:
     """
-    Perform FFT analysis on gyroscope data to identify noise and resonance peaks.
+    Analyze gyroscope time-series data with FFT to extract per-axis frequency spectra, resonance peaks, dominant frequency, noise floor, band energies, and basic statistics.
     
-    This measures:
-    - Frequency spectrum of each axis
-    - Dominant frequencies
-    - Resonance peaks (frequencies with high energy)
-    - Noise floor
+    Parameters:
+        parser: Parser-like object providing time and gyro fields (accessed via get_time_array and extract_field_data).
     
-    Args:
-        parser: orangebox Parser instance
-        
     Returns:
-        Dict with keys for each axis: {
-            "roll": {"freqs": [...], "psd": [...], "peaks": [...]},
-            "pitch": {...},
-            "yaw": {...}
-        }
+        dict: Mapping each axis name ("roll", "pitch", "yaw") to either an analysis dict or an error dict.
+            On success each axis dict contains:
+                - "freqs": downsampled frequency bins (numpy array or list of floats)
+                - "psd": downsampled power spectral density values (numpy array or list of floats)
+                - "peaks": list of up to 10 peak dicts with keys "frequency_hz", "power", "power_db"
+                - "dominant_frequency_hz": float
+                - "noise_floor": float
+                - "energy_bands": dict of band energies (e.g., "5-50", "50-100", "100-250", "250-500")
+                - "gyro_stats": statistics produced by calculate_stats(gyro_data)
+            If global prerequisites fail, returns {"error": "<message>"}. If an axis cannot be analyzed, that axis maps to {"error": "<message>"}.
     """
     result = {}
     
@@ -69,15 +68,24 @@ def analyze_fft_noise(parser) -> Dict[str, Any]:
 
 def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -> Dict[str, Any]:
     """
-    Perform FFT analysis on a single gyro axis.
+    Analyze a single gyroscope axis using FFT to extract PSD, resonance peaks, dominant frequency, noise floor, and band energies.
     
-    Args:
-        gyro_data: Gyroscope data array
-        fs: Sampling frequency in Hz
-        axis: Axis name for logging
-        
+    Parameters:
+        gyro_data (np.ndarray): Time-series gyroscope samples for the axis.
+        fs (float): Sampling frequency in Hz.
+        axis (str): Human-readable axis name used for context (e.g., "roll", "pitch", "yaw").
+    
     Returns:
-        Analysis results dict
+        result (Dict[str, Any]): Analysis results. On success the dictionary contains:
+            - "freqs": list[float] — downsampled frequency bins (Hz).
+            - "psd": list[float] — downsampled power spectral density values.
+            - "peaks": list[dict] — up to 10 resonance peak objects with
+                "frequency_hz", "power", and "power_db".
+            - "dominant_frequency_hz": float — frequency of the highest-power peak or 0.0 if none.
+            - "noise_floor": float — median PSD below 50 Hz (or 0.0 if no bins).
+            - "energy_bands": dict — summed PSD energy for predefined bands.
+            - "gyro_stats": dict — summary statistics for the input gyro_data.
+        If input is insufficient, returns {"error": "Insufficient data"}.
     """
     n = len(gyro_data)
     if n < 2:
@@ -146,16 +154,16 @@ def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -
 
 def _get_band_energy(freqs: np.ndarray, psd: np.ndarray, f_min: float, f_max: float) -> float:
     """
-    Calculate energy in a frequency band.
+    Compute the total power spectral density (PSD) energy within the half-open frequency band [f_min, f_max).
     
-    Args:
-        freqs: Frequency array
-        psd: Power spectral density array
-        f_min: Minimum frequency
-        f_max: Maximum frequency
-        
+    Parameters:
+        freqs (np.ndarray): Array of frequency bin centers.
+        psd (np.ndarray): PSD values corresponding to `freqs`.
+        f_min (float): Inclusive lower bound of the frequency band (Hz).
+        f_max (float): Exclusive upper bound of the frequency band (Hz).
+    
     Returns:
-        Total energy in band
+        float: Sum of `psd` values for bins where `f_min <= freq < f_max`. Returns 0.0 if no bins fall in the band.
     """
     mask = (freqs >= f_min) & (freqs < f_max)
     if not np.any(mask):

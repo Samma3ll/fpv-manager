@@ -11,23 +11,15 @@ logger = logging.getLogger(__name__)
 
 def analyze_pid_error(parser) -> Dict[str, Any]:
     """
-    Analyze PID control error for each axis.
+    Analyze PID control error for roll, pitch, and yaw axes.
     
-    This measures:
-    - RMS error: Root mean square of error signal
-    - Max error: Maximum error magnitude
-    - Mean absolute error: Average absolute error
-    - Error drift: Trend in error over time
+    For each axis, computes the error between commanded rate (`setpoint[i]`) and measured rate (`gyroADC[i]`) and returns per-axis metrics such as RMS error, maximum absolute error, mean absolute error, error drift (trend), derivative-like RMS, percentile magnitudes (p50/p75/p90/p99), and additional summary statistics.
     
-    Args:
-        parser: orangebox Parser instance
-        
+    Parameters:
+        parser: Parser instance that provides time-series fields (must supply `setpoint[i]` and `gyroADC[i]`).
+    
     Returns:
-        Dict with keys for each axis: {
-            "roll": {"rms_error": ..., "max_error": ..., "mean_abs_error": ...},
-            "pitch": {...},
-            "yaw": {...}
-        }
+        A dict with keys "roll", "pitch", and "yaw". Each value is either a metrics dict containing the computed error statistics or an `{"error": "<message>"}` dict when data is missing or analysis failed.
     """
     result = {}
     
@@ -64,14 +56,22 @@ def analyze_pid_error(parser) -> Dict[str, Any]:
 
 def _analyze_axis_error(error: np.ndarray, axis: str = "unknown") -> Dict[str, Any]:
     """
-    Analyze error characteristics for a single axis.
+    Compute a set of error metrics for a single control axis from a 1-D error signal.
     
-    Args:
-        error: Error array (command - actual)
-        axis: Axis name for logging
-        
+    Parameters:
+        error (np.ndarray): Array of error values (commanded - measured) for the axis; NaN values will be ignored.
+        axis (str): Optional axis name used for context in results (e.g., "roll", "pitch", "yaw").
+    
     Returns:
-        Analysis results dict
+        Dict[str, Any]: Dictionary with computed metrics or an error entry when input is empty/invalid. When successful, the dictionary contains:
+            - "rms_error" (float): Root-mean-square of the error signal.
+            - "max_error" (float): Maximum absolute error.
+            - "mean_abs_error" (float): Mean of the absolute error.
+            - "error_stats" (dict): Additional summary statistics produced by calculate_stats for the raw error array.
+            - "error_drift" (float): Trend slope of per-chunk mean absolute error (positive = increasing magnitude, negative = decreasing).
+            - "error_derivative_rms" (float): RMS of the first difference of the error signal (derivative-like metric).
+            - "error_percentiles" (dict): Absolute-error percentiles with keys "p50", "p75", "p90", and "p99" (all floats).
+        If the input contains no samples or no valid (non-NaN) values, returns {"error": "No error data"} or {"error": "No valid error data"} respectively.
     """
     if len(error) < 1:
         return {"error": "No error data"}

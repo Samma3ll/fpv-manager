@@ -11,20 +11,21 @@ logger = logging.getLogger(__name__)
 
 def analyze_motor_output(parser) -> Dict[str, Any]:
     """
-    Analyze motor output characteristics to identify imbalance and resonance.
+    Produce per-motor and overall diagnostics from a Parser containing motor time-series fields.
     
-    This measures:
-    - Average motor output for each motor
-    - Min/max output range
-    - Motor imbalance (deviation from ideal)
-    - Resonance peaks in motor output
-    - Motor output correlation
+    Scans parser.field_names for motor[0]..motor[3], extracts each available motor series, and computes per-motor statistics (average/min/max/rms/idle/activity level/throttle change count). If no motor fields are found, returns {"error": "No motor data found"}. Per-motor extraction or analysis errors are recorded under the corresponding motor key. If two or more motors are available, computes overall metrics (imbalance percentage, pairwise correlations when applicable, per-motor deviations, and potential resonance peaks); overall analysis errors are recorded in the "overall" entry.
     
-    Args:
-        parser: orangebox Parser instance
-        
+    Parameters:
+        parser: orangebox Parser instance providing time-series fields and a `field_names` iterable.
+    
     Returns:
-        Analysis results dict
+        dict: {
+          "motors": {
+            "motor_<idx>": { ... per-motor metrics ... } | {"error": "<message>"},
+            ...
+          },
+          "overall": { ... overall metrics ... } | {"error": "<message>"} 
+        }
     """
     result = {
         "motors": {},
@@ -75,14 +76,28 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
 
 def _analyze_motor(motor_data: np.ndarray, motor_idx: int) -> Dict[str, Any]:
     """
-    Analyze a single motor output.
+    Compute per-motor output metrics from a time-series sample array.
     
-    Args:
-        motor_data: Motor output values
-        motor_idx: Motor index
-        
+    Analyzes a single motor's time-series by removing NaNs, computing summary statistics (mean/min/max/rms/std), estimating an idle output from an initial stable window, identifying an "active" output region above a threshold, and counting large sample-to-sample changes indicative of throttle/input events.
+    
+    Parameters:
+        motor_data (np.ndarray): 1-D array of motor output samples (may contain NaNs).
+        motor_idx (int): Index of the motor being analyzed (used for identification only).
+    
     Returns:
-        Analysis results dict
+        dict: Analysis results or an error dict. Successful result contains:
+            - avg_output (float): Mean output over valid samples.
+            - min_output (float): Minimum valid sample.
+            - max_output (float): Maximum valid sample.
+            - output_range (float): max_output - min_output.
+            - rms_output (float): Root-mean-square of valid samples.
+            - output_std (float): Standard deviation of valid samples.
+            - idle_estimate (float): Estimated idle/low-output level from an initial window.
+            - activity_level (float): Fraction of samples above the active threshold (0.0–1.0).
+            - throttle_changes (int): Count of large sample-to-sample changes (spike events).
+            - active_output_stats (dict, optional): Summary stats for samples in the active region (same keys as the general stats) present only if active samples exist.
+        Or:
+            {"error": "No valid motor data"} if no non-NaN samples are available.
     """
     # Remove invalid data
     motor_clean = motor_data[~np.isnan(motor_data)]
@@ -134,13 +149,18 @@ def _analyze_motor(motor_data: np.ndarray, motor_idx: int) -> Dict[str, Any]:
 
 def _analyze_overall_motors(motor_data_list: List[tuple]) -> Dict[str, Any]:
     """
-    Analyze overall motor characteristics and balance.
+    Compute cross-motor balance and synchronization metrics from multiple motor time series.
     
-    Args:
-        motor_data_list: List of (motor_idx, motor_data) tuples
-        
+    Parameters:
+        motor_data_list (List[tuple]): List of (motor_index, motor_data) tuples where `motor_data` is a 1-D numeric array or sequence for that motor.
+    
     Returns:
-        Analysis results dict
+        dict: Analysis results containing:
+            - imbalance_pct (float): Coefficient of variation of per-motor means expressed as a percentage.
+            - motor_correlation_mean (float), motor_correlation_min (float), motor_correlation_max (float): Mean, minimum, and maximum pairwise Pearson correlation values (present when four motors are analyzed).
+            - motor_deviations (List[float]): Per-motor deviation from the overall mean (mean over the common truncated window).
+            - max_deviation (float): Maximum absolute deviation among motors.
+            - potential_resonance_peaks (List[float]): Frequencies (Hz) of resonance peaks commonly observed across motors.
     """
     result = {}
     
@@ -201,14 +221,14 @@ def _analyze_overall_motors(motor_data_list: List[tuple]) -> Dict[str, Any]:
 
 def _find_motor_resonances(motor_data_list: List[tuple], fs: float = 8000) -> List[float]:
     """
-    Find common resonance peaks across motor outputs.
+    Identify frequency peaks that appear across multiple motors' output spectra.
     
-    Args:
-        motor_data_list: List of (motor_idx, motor_data) tuples
-        fs: Sampling frequency in Hz (approximate)
-        
+    Parameters:
+        motor_data_list (List[tuple]): Iterable of (motor_idx, motor_data) where `motor_data` is a 1-D numeric sequence of time-domain samples for that motor.
+        fs (float): Sampling frequency in Hz used to compute frequency bins (default 8000).
+    
     Returns:
-        List of resonant frequencies
+        List[float]: Sorted list of candidate resonant frequencies in Hz (typically within 10–500 Hz). Returns an empty list if fewer than two motors provide valid data or if analysis fails.
     """
     try:
         from scipy import signal as scipy_signal

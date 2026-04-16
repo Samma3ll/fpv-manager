@@ -10,7 +10,14 @@ sys.path.insert(0, str(Path(__file__).parent / 'backend'))
 from orangebox import Parser
 
 def inspect_log(log_path):
-    """Inspect and print all available fields in a blackbox log."""
+    """
+    Inspect and print metadata and field information from a blackbox log file.
+    
+    Prints header entries, lists available field names with indices and count, reports presence of a set of required fields with descriptions, counts total frames, and if a `time` field exists, samples the first ~101 time stamps to print a sample duration in seconds.
+    
+    Parameters:
+        log_path (str): Path to the blackbox log file to inspect.
+    """
     print(f"\n📋 Inspecting: {log_path}\n")
     
     parser = Parser.load(log_path)

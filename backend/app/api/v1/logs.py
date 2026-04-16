@@ -268,14 +268,15 @@ async def get_log_analyses(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict:
     """
-    Retrieve all analysis results for a blackbox log.
+    Retrieve all persisted analysis results for a BlackboxLog.
     
-    Returns a dict with keys for each analysis module:
-    - step_response: Step response characteristics
-    - fft_noise: Frequency domain analysis
-    - pid_error: PID control error metrics
-    - motor_analysis: Motor output analysis
-    - tune_score: Overall tune quality score
+    Returns a dictionary keyed by analysis module name. Each value is a dict containing:
+    - `module` (str): analysis module name
+    - `result` (Any): parsed analysis payload from `result_json`
+    - `created_at` (str): ISO 8601 timestamp when the analysis was created
+    
+    Raises:
+        HTTPException: 404 if the log does not exist or if no analyses are found for the log.
     """
     from app.models import LogAnalysis
     
@@ -324,14 +325,16 @@ async def get_log_analysis(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict:
     """
-    Retrieve analysis results for a specific module.
+    Retrieve the analysis result for a specific analysis module within a blackbox log.
     
     Parameters:
-        log_id: Log ID
-        module: Analysis module name (step_response, fft_noise, pid_error, motor_analysis, tune_score)
+        module (str): Analysis module name (e.g., "step_response", "fft_noise", "pid_error", "motor_analysis", "tune_score").
     
     Returns:
-        Analysis results for the specified module
+        dict: Mapping with keys:
+            - "module": the analysis module name.
+            - "result": the analysis payload as stored in `result_json`.
+            - "created_at": ISO 8601 timestamp string of when the analysis was created.
     """
     from app.models import LogAnalysis
     

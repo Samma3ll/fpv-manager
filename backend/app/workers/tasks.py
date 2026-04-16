@@ -19,8 +19,15 @@ logger = logging.getLogger(__name__)
 
 def sanitize_for_json(obj):
     """
-    Recursively sanitize Python objects to make them JSON-serializable.
-    Replaces NaN, Inf, -Inf with None.
+    Recursively convert Python values into JSON-safe structures.
+    
+    Replaces `NaN`, `Infinity`, and `-Infinity` floats with `None`, and recursively sanitizes values inside dicts, lists, and tuples; other values are returned unchanged.
+    
+    Parameters:
+        obj: The value to sanitize. May be a float, dict, list, tuple, or any other Python value.
+    
+    Returns:
+        The sanitized value: `None` for `NaN`/`Inf`/`-Inf` floats, a dict or list with sanitized contents for containers, or the original value for other types.
     """
     if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
@@ -222,19 +229,19 @@ def parse_blackbox_log(self, log_id: int):
 @shared_task(bind=True, name="run_all_analyses")
 def run_all_analyses(self, log_id: int):
     """
-    Orchestrator task that runs all Phase 5 analyses on a log.
+    Run all configured analyses for a BlackboxLog and persist their sanitized results.
     
-    This task:
-    1. Downloads the log file
-    2. Runs step response, FFT, PID error, and motor analyses
-    3. Calculates overall tune quality score
-    4. Stores all results in database
+    Downloads the log, builds a parser, runs step response, FFT noise, PID error, and motor analyses, computes an overall tune score, replaces any existing LogAnalysis rows for the log with the five analysis results (step_response, fft_noise, pid_error, motor_analysis, tune_score), and commits the results.
     
     Parameters:
         log_id (int): Primary key of the BlackboxLog to analyze
-        
+    
     Returns:
-        dict: Results summary
+        dict: Summary with keys:
+            - `log_id`: the analyzed log id
+            - `status`: `"success"` or `"error"`
+            - on success: `tune_score` (the tune overall_score or 0) and `modules_analyzed` (5)
+            - on error: `error` (error message)
     """
     logger.info(f"Starting all analyses for log {log_id}")
     
@@ -350,7 +357,17 @@ def run_all_analyses(self, log_id: int):
 
 @shared_task(bind=True, name="analyze_log_step_response")
 def analyze_log_step_response(self, log_id: int):
-    """Analyze step response from a blackbox log."""
+    """
+    Run step-response analysis for a BlackboxLog and persist the result.
+    
+    Downloads the log file for the given BlackboxLog id, constructs a parser, runs the step-response analysis, stores the analysis output in the LogAnalysis table under module "step_response", and returns a summary of the operation.
+    
+    Parameters:
+        log_id (int): ID of the BlackboxLog to analyze.
+    
+    Returns:
+        dict: Summary containing at minimum `log_id`, `module` ("step_response"), and `status` ("success" or "error"). On error, includes an `error` string with the exception message.
+    """
     logger.info(f"Analyzing step response for log {log_id}")
     
     session_factory = get_sync_session_factory()
@@ -403,7 +420,16 @@ def analyze_log_step_response(self, log_id: int):
 
 @shared_task(bind=True, name="analyze_log_fft")
 def analyze_log_fft(self, log_id: int):
-    """Analyze FFT noise from a blackbox log."""
+    """
+    Run FFT noise analysis for the specified blackbox log and persist the result.
+    
+    Returns:
+        dict: Summary of the operation containing:
+            - `log_id` (int): The analyzed log id.
+            - `module` (str): The module name `"fft_noise"`.
+            - `status` (str): `"success"` when stored, `"error"` on failure.
+            - `error` (str, optional): Error message present when `status` is `"error"`.
+    """
     logger.info(f"Analyzing FFT for log {log_id}")
     
     session_factory = get_sync_session_factory()
@@ -456,7 +482,15 @@ def analyze_log_fft(self, log_id: int):
 
 @shared_task(bind=True, name="analyze_log_pid_error")
 def analyze_log_pid_error(self, log_id: int):
-    """Analyze PID error from a blackbox log."""
+    """
+    Run PID error analysis for the blackbox log identified by log_id and persist the result as a LogAnalysis row.
+    
+    Parameters:
+        log_id (int): ID of the BlackboxLog to analyze.
+    
+    Returns:
+        dict: Summary including `log_id`, `module` (set to `"pid_error"`), and `status` (`"success"` or `"error"`). On error includes an `error` key with the exception message.
+    """
     logger.info(f"Analyzing PID error for log {log_id}")
     
     session_factory = get_sync_session_factory()
@@ -509,7 +543,19 @@ def analyze_log_pid_error(self, log_id: int):
 
 @shared_task(bind=True, name="analyze_log_motor")
 def analyze_log_motor(self, log_id: int):
-    """Analyze motor output from a blackbox log."""
+    """
+    Run motor-output analysis for a blackbox log and persist the result.
+    
+    Downloads the log file, constructs a parser, executes the motor-output analysis, and stores the analysis JSON in the `LogAnalysis` table with module name `"motor_analysis"`.
+    
+    Parameters:
+        log_id (int): Primary key of the BlackboxLog entry to analyze.
+    
+    Returns:
+        dict: On success: `{"log_id": log_id, "module": "motor_analysis", "status": "success"}`.
+              If the log entry is not found: `{"log_id": log_id, "status": "error"}`.
+              On analysis or storage failure: `{"log_id": log_id, "module": "motor_analysis", "status": "error", "error": <error message>}`.
+    """
     logger.info(f"Analyzing motor output for log {log_id}")
     
     session_factory = get_sync_session_factory()

@@ -19,23 +19,15 @@ logger = logging.getLogger(__name__)
 
 def analyze_step_response(parser) -> Dict[str, Any]:
     """
-    Analyze step response characteristics for roll, pitch, and yaw axes.
+    Compute step-response metrics for roll, pitch, and yaw from the parser's time-series data.
     
-    This measures:
-    - Rise time: Time to reach 90% of final value
-    - Overshoot: Peak value exceeding final value
-    - Settling time: Time to settle within 2% of final value
-    - Ringing: Number and amplitude of oscillations
+    Validates the common time axis and sample interval, then for each axis extracts `gyroADC[index]` and `rcCommand[index]` to produce a per-axis analysis. Each axis entry contains averaged step metrics (e.g., `rise_time_ms`, `overshoot_pct`, `settling_time_ms`, `ringing`) and overall gyro statistics, or an `error`/`warning` entry when analysis cannot be performed.
     
-    Args:
-        parser: orangebox Parser instance
-        
+    Parameters:
+        parser: orangebox Parser instance supplying time, `gyroADC[...]`, and `rcCommand[...]` fields.
+    
     Returns:
-        Dict with keys for each axis: {
-            "roll": {...},
-            "pitch": {...},
-            "yaw": {...}
-        }
+        result (Dict[str, Any]): Mapping of axis names ("roll", "pitch", "yaw") to their analysis dictionaries or error/warning payloads.
     """
     result = {}
     
@@ -87,16 +79,29 @@ def _analyze_axis_response(
     axis: str = "unknown"
 ) -> Dict[str, Any]:
     """
-    Analyze step response for a single axis.
+    Detects stick-induced step inputs in the rate command and summarizes gyro step-response metrics for a single axis.
     
-    Args:
-        gyro_data: Gyroscope data for axis
-        rate_cmd: Rate command (stick input) for axis
-        dt: Time step in seconds
-        axis: Axis name for logging
-        
+    Analyzes regions where the rate command changes abruptly, computes per-step metrics (rise time, overshoot, settling time, ringing) from corresponding gyro segments, and returns the averaged metrics together with the number of steps analyzed and overall gyro statistics. If no step inputs or no clear step responses are found, the result will contain a `warning` entry and overall gyro statistics.
+    
+    Parameters:
+        gyro_data (np.ndarray): Time-series gyroscope measurements for the axis.
+        rate_cmd (np.ndarray): Time-series rate command (stick) corresponding to the same time base as `gyro_data`.
+        dt (float): Sample interval in seconds.
+        axis (str): Human-readable axis name used for logging and messages.
+    
     Returns:
-        Analysis results dict
+        Dict[str, Any]: A dictionary containing either:
+          - Averaged metrics:
+              - `rise_time_ms` (float): Mean rise time to 90% of steady state across detected steps, in milliseconds.
+              - `overshoot_pct` (float): Mean overshoot percentage relative to steady state.
+              - `settling_time_ms` (float): Mean settling time within the 2% band, in milliseconds.
+              - `ringing` (float): Mean count of post-settling peaks.
+              - `steps_analyzed` (int): Number of step responses included in the averages.
+              - `gyro_stats` (dict): Summary statistics of the provided gyro data.
+          - Or, when no steps are found:
+              - A dict containing a `warning` string and `gyro_stats`.
+          - Or, when step inputs are not detected at all:
+              - A dict containing a `warning` string indicating no step inputs detected.
     """
     # Find step input regions (where rate_cmd changes significantly)
     rate_cmd_derivative = calculate_derivative(rate_cmd, dt)
@@ -154,14 +159,18 @@ def _analyze_axis_response(
 
 def _analyze_single_step(step_signal: np.ndarray, dt: float) -> Dict[str, Any]:
     """
-    Analyze characteristics of a single step response.
+    Measure rise time, overshoot, settling time, and ringing of a single gyro step-response segment.
     
-    Args:
-        step_signal: Gyro data during step
-        dt: Time step in seconds
-        
+    Parameters:
+        step_signal (np.ndarray): Gyro signal for the step-response window.
+        dt (float): Sample interval in seconds.
+    
     Returns:
-        Dict with rise_time_ms, overshoot_pct, settling_time_ms, ringing
+        dict: Analysis metrics with the following keys:
+            - rise_time_ms (float): Time in milliseconds to first reach 90% of the estimated steady-state.
+            - overshoot_pct (float): Percent overshoot relative to the steady-state (0.0 if steady-state is zero or no overshoot).
+            - settling_time_ms (float): Time in milliseconds to first enter and remain within a ±2% band around steady-state after the initial 10% of the window (0.0 if not settled).
+            - ringing (float): Count of detected peaks after settling (0.0 if none or not settled).
     """
     # Normalize to get response characteristics
     signal_normalized = normalize_signal(step_signal)

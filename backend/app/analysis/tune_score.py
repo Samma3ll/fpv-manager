@@ -13,22 +13,23 @@ def score_tune_quality(
     motor_analysis: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Generate an overall tune quality score based on all analyses.
+    Compute a 0–100 tune quality score for each axis and an aggregated overall score.
     
-    Scoring criteria:
-    - Step Response: Lower is better for overshoot, settling time. Higher is better for rise time.
-    - FFT Noise: Lower resonance peaks indicate cleaner tuning
-    - PID Error: Lower error indicates better control
-    - Motor Analysis: Lower imbalance indicates better motor balance
+    Produces per-axis scores for roll, pitch, and yaw based on provided analyses, averages the three axis scores, applies a motor imbalance penalty to the average, clamps the final overall score to the range 0–100, and returns detailed component breakdowns. On internal failure the returned dict will include an "error" string and any partially computed results.
     
-    Args:
-        step_response: Step response analysis results
-        fft_noise: FFT noise analysis results
-        pid_error: PID error analysis results
-        motor_analysis: Motor output analysis results
-        
+    Parameters:
+        step_response (Dict[str, Any]): Per-axis step response analysis results.
+        fft_noise (Dict[str, Any]): Per-axis FFT noise analysis results.
+        pid_error (Dict[str, Any]): Per-axis PID error analysis results.
+        motor_analysis (Dict[str, Any]): Motor balance/imbalance analysis used to compute a motor penalty.
+    
     Returns:
-        Dict with scores for each axis and overall score
+        Dict[str, Any]: A dictionary containing:
+            - "roll_score", "pitch_score", "yaw_score" (float): Per-axis scores in 0–100.
+            - "overall_score" (float): Aggregated score after motor penalty, clamped to 0–100.
+            - "motor_penalty" (float): Applied penalty fraction (0.0–0.2).
+            - "details" (dict): Per-axis detailed scoring components and intermediate values.
+            - "error" (str, optional): Error message if scoring failed.
     """
     result = {
         "roll_score": 0.0,
@@ -80,9 +81,15 @@ def _score_axis(
     pid_error: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Score a single axis based on all analyses.
+    Compute an aggregate quality score for a single control axis using step response, FFT noise, and PID error analyses.
     
-    Returns score from 0-100 where 100 is excellent.
+    The function combines per-component scores into a final score and clamps the result to the range 0.0–100.0.
+    
+    Returns:
+        result (dict): A dictionary containing:
+            - score (float): Aggregate axis score between 0.0 and 100.0.
+            - components (dict): Per-component scores with keys
+              'step_response', 'fft_noise', and 'pid_error' (each a float 0.0–100.0).
     """
     score = 100.0
     components = {}
@@ -112,7 +119,23 @@ def _score_axis(
 
 
 def _score_step_response(step_response: Dict[str, Any]) -> float:
-    """Score step response characteristics."""
+    """
+    Compute a 0–100 quality score for a step response based on rise time, overshoot, settling time, and ringing.
+    
+    Evaluates the provided step_response metrics to deduct penalties from an initial perfect score. If step_response contains an "error" key, a neutral score of 50.0 is returned. The following properties influence the score:
+    - rise_time_ms: penalizes responses that are too fast or too slow relative to an ideal range.
+    - overshoot_pct: penalizes excessive overshoot.
+    - settling_time_ms: penalizes long settling times.
+    - ringing: penalizes sustained oscillations.
+    The final score is clamped to the range 0.0–100.0.
+    
+    Parameters:
+        step_response (Dict[str, Any]): Step response metrics dictionary containing optional keys
+            "rise_time_ms", "overshoot_pct", "settling_time_ms", "ringing", or an "error" key.
+    
+    Returns:
+        float: Quality score between 0.0 and 100.0; `50.0` if `step_response` contains an "error" key.
+    """
     if "error" in step_response:
         return 50.0  # Neutral score if data unavailable
     
@@ -150,7 +173,19 @@ def _score_step_response(step_response: Dict[str, Any]) -> float:
 
 
 def _score_fft_noise(fft_noise: Dict[str, Any]) -> float:
-    """Score frequency domain characteristics."""
+    """
+    Evaluate frequency-domain noise characteristics and produce a 0–100 quality score for FFT-based analysis.
+    
+    Parameters:
+        fft_noise (Dict[str, Any]): Frequency-domain analysis data. Expected keys:
+            - "error": optional; if present, a neutral score is returned.
+            - "peaks": optional list of peak dicts with "power_db".
+            - "noise_floor": optional numeric noise floor.
+            - "energy_bands": optional dict with keys like "5_50_hz" and "250_500_hz" for low/high band energies.
+    
+    Returns:
+        float: A score between 0.0 and 100.0 where higher values indicate cleaner frequency-domain characteristics; returns 50.0 if `fft_noise` contains an "error" key.
+    """
     if "error" in fft_noise:
         return 50.0  # Neutral score
     
@@ -195,7 +230,19 @@ def _score_fft_noise(fft_noise: Dict[str, Any]) -> float:
 
 
 def _score_pid_error(pid_error: Dict[str, Any]) -> float:
-    """Score PID control error."""
+    """
+    Compute a 0–100 quality score describing PID tracking error for a single axis.
+    
+    Parameters:
+        pid_error (Dict[str, Any]): Analysis data for the axis. Recognized keys:
+            - `rms_error` (float): root-mean-square of the control error (degrees/sec).
+            - `max_error` (float): maximum observed error (degrees/sec).
+            - `error_drift` (float): steady drift of the error.
+            If the dictionary contains an `"error"` key, a neutral score is returned.
+    
+    Returns:
+        float: Score between 0.0 and 100.0 where higher is better. `50.0` is returned when `pid_error` contains an `"error"` key.
+    """
     if "error" in pid_error:
         return 50.0  # Neutral score
     
@@ -231,7 +278,17 @@ def _score_pid_error(pid_error: Dict[str, Any]) -> float:
 
 
 def _get_motor_penalty(motor_analysis: Dict[str, Any]) -> float:
-    """Get penalty for motor imbalance (0 = no penalty, 1 = full penalty)."""
+    """
+    Compute a motor-balance penalty to reduce the overall tune score.
+    
+    The function reads motor_analysis["overall"]["imbalance_pct"] (percentage) and maps it to a penalty: returns 0.0 if imbalance < 5, 0.2 if imbalance > 20, and a linear value between 0.0 and 0.2 for values in [5, 20].
+    
+    Parameters:
+        motor_analysis (Dict[str, Any]): Mapping expected to contain an "overall" dict with an "imbalance_pct" numeric percentage.
+    
+    Returns:
+        float: Penalty value between 0.0 and 0.2 to be multiplied with the overall score reduction.
+    """
     try:
         overall = motor_analysis.get("overall", {})
         imbalance = overall.get("imbalance_pct", 0)
