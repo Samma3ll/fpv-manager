@@ -29,9 +29,9 @@ class Drone(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    frame_size = Column(Float, nullable=True)  # mm
+    frame_size = Column(String(50), nullable=True)  # e.g., "3-inch", "5-inch", "5mm"
     motor_kv = Column(Integer, nullable=True)  # KV rating
-    prop_size = Column(Float, nullable=True)  # inches
+    prop_size = Column(String(50), nullable=True)  # e.g., "5-inch", "6-inch"
     weight_g = Column(Float, nullable=True)  # grams
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
