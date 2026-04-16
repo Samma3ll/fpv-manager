@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 4 - Log Parsing Worker ✅
+- MinIO file storage integration for Betaflight log files (.BBL)
+- Celery async task triggering on file upload with priority queue
+- Blackbox log parsing using orangebox library with error handling
+- Automatic extraction of Betaflight metadata (tested with real drone logs):
+  - Firmware version (e.g., "Betaflight 2025.12.1 (85d201376) STM32F405")
+  - Craft name (optional, may be blank)
+  - PID values (Roll, Pitch, Yaw P-values extracted from [P, I, D] tuples)
+  - Flight duration calculation from frame time data (microseconds to seconds)
+- Log entry status management: pending → processing → ready/error
+- MinIO client wrapper (minio.py) with upload/download/delete operations
+- Task error handling with automatic retry mechanism (max 3 retries)
+- Database transaction safety with AsyncSession
+- Detailed error logging and error_message storage in database
+
 ### Phase 3 - Backend API (FastAPI) ✅
 - Pydantic request/response schemas with validation (DroneCreate, DroneUpdate, DroneResponse, BlackboxLogCreate, BlackboxLogResponse, etc.)
 - Drone CRUD endpoints: POST /api/v1/drones, GET /api/v1/drones (paginated), GET /api/v1/drones/{id}, PATCH /api/v1/drones/{id}, DELETE /api/v1/drones/{id}
@@ -18,7 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker entrypoint script for automatic migration execution on startup
 - Alembic async migration support with asyncpg driver
 - Field validation with Pydantic constraints (min/max lengths, numeric ranges, required fields)
-- **Note**: MinIO file storage and Celery task triggering are Phase 4 features (currently TODO)
 
 ### Phase 2 - Database Schema & ORM ✅
 - SQLAlchemy models: Drone, BlackboxLog (with LogStatus enum), LogAnalysis, Module
@@ -35,15 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database automatically initialized by migrations on container startup
 
 ### Planned
-
-#### Phase 4 - Log Parsing Worker
-- MinIO file upload integration (store .BBL files in S3-compatible storage)
-- Celery task triggering on file upload
-- Parse .BBL files using orangebox library
-- Extract Betaflight metadata (PID values, version, craft name, flight duration)
-- Update log entry with parsed metadata and "ready" status
-- Error handling and "error" status for failed parses
-- Task monitoring and status updates
 
 #### Phase 5 - Analysis Modules
 - Step response analysis
