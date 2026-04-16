@@ -35,10 +35,18 @@ async def upload_log(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> BlackboxLogResponse:
     """
-    Upload a blackbox log file (.BBL format).
+    Store an uploaded Betaflight blackbox log, create a corresponding DB record with pending status, and enqueue asynchronous parsing.
     
-    Returns the created log entry with metadata.
-    File will be processed asynchronously by Celery worker.
+    Parameters:
+        file (UploadFile): Uploaded `.bbl` file. Must include a non-empty filename and have a `.bbl` extension.
+        drone_id (int): Target drone ID (must be greater than 0).
+        session (AsyncSession): Database session dependency.
+    
+    Returns:
+        BlackboxLogResponse: The created log entry with metadata and initial `PENDING` status.
+    
+    Raises:
+        HTTPException: 400 if the upload has no filename or the file is not a `.bbl`; 404 if the specified drone does not exist; 500 if storing the file in object storage fails.
     """
     if not file.filename:
         raise HTTPException(

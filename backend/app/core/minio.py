@@ -14,7 +14,13 @@ class MinIOClient:
     """MinIO S3-compatible object storage client."""
 
     def __init__(self):
-        """Initialize MinIO client with settings."""
+        """
+        Initialize the MinIO client using application configuration.
+        
+        Creates and stores a configured Minio SDK client on the instance and sets
+        the `bucket_blackbox` and `bucket_assets` attributes to the configured
+        bucket names from settings.
+        """
         self.client = Minio(
             settings.minio_public_url.replace("http://", "").replace("https://", ""),
             access_key=settings.minio_root_user,
@@ -28,18 +34,18 @@ class MinIOClient:
         self, bucket: str, object_name: str, file_content: bytes
     ) -> str:
         """
-        Upload a file to MinIO.
-
-        Args:
-            bucket: Bucket name
-            object_name: Object key/path in bucket
-            file_content: File content as bytes
-
+        Upload a file to the specified MinIO bucket.
+        
+        Parameters:
+            bucket (str): Destination bucket name.
+            object_name (str): Key/path for the object inside the bucket.
+            file_content (bytes): File content to upload.
+        
         Returns:
-            Object name (key) if successful
-
+            str: `object_name` of the uploaded object.
+        
         Raises:
-            S3Error: If upload fails
+            S3Error: If the upload fails.
         """
         try:
             self.client.put_object(
@@ -56,17 +62,17 @@ class MinIOClient:
 
     def download_file(self, bucket: str, object_name: str) -> bytes:
         """
-        Download a file from MinIO.
-
-        Args:
-            bucket: Bucket name
-            object_name: Object key/path in bucket
-
+        Download an object from MinIO and return its contents.
+        
+        Parameters:
+            bucket (str): Name of the bucket.
+            object_name (str): Object key or path within the bucket.
+        
         Returns:
-            File content as bytes
-
+            bytes: The object's content.
+        
         Raises:
-            S3Error: If download fails
+            S3Error: If the object cannot be retrieved.
         """
         try:
             response = self.client.get_object(bucket_name=bucket, object_name=object_name)
@@ -80,14 +86,14 @@ class MinIOClient:
 
     def delete_file(self, bucket: str, object_name: str) -> None:
         """
-        Delete a file from MinIO.
-
-        Args:
-            bucket: Bucket name
-            object_name: Object key/path in bucket
-
+        Delete an object from the given MinIO bucket.
+        
+        Parameters:
+            bucket (str): Name of the target bucket.
+            object_name (str): Key or path of the object to delete.
+        
         Raises:
-            S3Error: If deletion fails
+            S3Error: If the MinIO deletion operation fails.
         """
         try:
             self.client.remove_object(bucket_name=bucket, object_name=object_name)
@@ -98,14 +104,14 @@ class MinIOClient:
 
     def file_exists(self, bucket: str, object_name: str) -> bool:
         """
-        Check if a file exists in MinIO.
-
-        Args:
-            bucket: Bucket name
-            object_name: Object key/path in bucket
-
+        Determine whether an object with the given name exists in the specified bucket.
+        
+        Parameters:
+            bucket (str): Name of the bucket to check.
+            object_name (str): Object key or path within the bucket.
+        
         Returns:
-            True if file exists, False otherwise
+            `true` if the object exists in the bucket, `false` otherwise.
         """
         try:
             self.client.stat_object(bucket_name=bucket, object_name=object_name)
