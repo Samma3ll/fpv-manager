@@ -134,8 +134,8 @@ See [.env.example](.env.example) for all available options. Key variables:
 
 This project follows a structured build plan in [plan.md](plan.md):
 
-- **Phase 1** ✅ — Project scaffold & infrastructure (this phase)
-- **Phase 2** — Database schema & Alembic migrations
+- **Phase 1** ✅ — Project scaffold & infrastructure
+- **Phase 2** ✅ — Database schema & ORM models with Alembic
 - **Phase 3** — Backend API (CRUD endpoints)
 - **Phase 4** — Log parsing worker
 - **Phase 5** — Analysis modules (step response, FFT, PID error, motors)

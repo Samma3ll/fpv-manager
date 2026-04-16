@@ -7,15 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Phase 1 - Project Scaffold & Infrastructure ✅
-- Initial monorepo structure with backend/, frontend/, worker/ directories
-- Docker Compose configuration with 6 services (postgres, redis, minio, backend, worker, frontend)
-- Environment template (.env.example) with all configuration variables
-- Makefile with development shortcuts
-- README with setup and project overview
-- .gitignore for common development artifacts
-- Placeholder Dockerfiles for all services
-- Development overrides for hot-reload
+### Phase 2 - Database Schema & ORM ✅
+- SQLAlchemy models: Drone, BlackboxLog (with LogStatus enum), LogAnalysis, Module
+- Pydantic settings configuration (BaseSettings) for environment variables
+- Async SQLAlchemy engine with asyncpg driver
+- Alembic migration setup (env.py, script.py.mako, initial migration)
+- FastAPI entry point with lifespan events, health check endpoint, CORS middleware
+- Backend requirements.txt with all dependencies (FastAPI, SQLAlchemy, Alembic, etc.)
+- Updated Dockerfiles with healthchecks and proper layer caching
+- frontend/nginx.conf with API proxy routing (/api/ → backend:8000) and SPA support
+- .dockerignore files for backend, worker, frontend
 
 ### Planned
 

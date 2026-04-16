@@ -9,31 +9,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies (placeholder for now)
-# TODO: Create requirements.txt with:
-# - fastapi
-# - uvicorn
-# - sqlalchemy
-# - alembic
-# - asyncpg
-# - redis
-# - celery
-# - minio
-# - orangebox
-# - scipy
-# - pandas
-# - numpy
-# - plotly
-# - python-multipart
-# - pydantic
-# - pydantic-settings
+# Copy requirements first for better Docker layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY requirements.txt . || true
-RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
-
+# Copy application code
 COPY . .
 
 EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command for development (overridden by docker-compose)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

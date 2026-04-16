@@ -8,11 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies (shared with backend)
-COPY requirements.txt . || true
-RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+# Copy requirements first for better Docker layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code (shared with backend)
 COPY . .
 
-# Celery worker command
-CMD ["celery", "-A", "app.workers.tasks", "worker", "--loglevel=info"]
+# Celery worker command (overridden by docker-compose)
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info"]
