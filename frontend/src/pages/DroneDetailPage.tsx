@@ -191,7 +191,16 @@ export function DroneDetailPage() {
           </div>
           <label className="button-link file-trigger">
             Add .bbl files
-            <input hidden multiple accept=".bbl" type="file" onChange={(event) => void handleFiles(event.target.files)} />
+            <input
+              hidden
+              multiple
+              accept=".bbl"
+              type="file"
+              onChange={(event) => {
+                void handleFiles(event.target.files)
+                event.currentTarget.value = ''
+              }}
+            />
           </label>
         </div>
 
@@ -203,7 +212,16 @@ export function DroneDetailPage() {
             void handleFiles(event.dataTransfer.files)
           }}
         >
-          <input hidden multiple accept=".bbl" type="file" onChange={(event) => void handleFiles(event.target.files)} />
+          <input
+            hidden
+            multiple
+            accept=".bbl"
+            type="file"
+            onChange={(event) => {
+              void handleFiles(event.target.files)
+              event.currentTarget.value = ''
+            }}
+          />
           <strong>Drop BBL files here</strong>
           <span>Uploads stream directly to the backend storage endpoint and trigger worker parsing.</span>
         </label>
@@ -265,7 +283,7 @@ export function DroneDetailPage() {
                     <td>
                       R {formatNumber(log.pid_roll)} / P {formatNumber(log.pid_pitch)} / Y {formatNumber(log.pid_yaw)}
                     </td>
-                    <td>{log.tags.length ? log.tags.join(', ') : 'None'}</td>
+                    <td>{log.tags ? log.tags : 'None'}</td>
                     <td>
                       <div className="row-actions">
                         <button
@@ -274,7 +292,7 @@ export function DroneDetailPage() {
                           onClick={() => {
                             setEditLogId(log.id)
                             setNoteDraft(log.notes ?? '')
-                            setTagDraft(log.tags.join(', '))
+                            setTagDraft(log.tags ?? '')
                           }}
                         >
                           Edit

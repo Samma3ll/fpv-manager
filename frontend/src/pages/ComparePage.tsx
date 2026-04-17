@@ -62,6 +62,7 @@ export function ComparePage() {
       return
     }
 
+    setError(null)
     let active = true
 
     async function loadLogs() {
@@ -91,6 +92,7 @@ export function ComparePage() {
       return
     }
 
+    setError(null)
     let active = true
 
     async function loadAnalyses() {
@@ -158,7 +160,7 @@ export function ComparePage() {
         {loading ? <p className="muted-copy">Loading compare workspace...</p> : null}
 
         {!loading && drones.length === 0 ? (
-          <EmptyState title="No drones available" body="Create a drone and upload at least two logs to compare tune changes." />
+          <EmptyState title="No drones available" message="Create a drone and upload at least two logs to compare tune changes." />
         ) : (
           <div className="stack-gap">
             <label>
@@ -208,7 +210,7 @@ export function ComparePage() {
 
       {comparedLogs.length === 0 ? (
         <section className="section-card">
-          <EmptyState title="Select logs to compare" body="Pick up to four logs from the same drone. The page overlays available FFT data and summarizes stored scores." />
+          <EmptyState title="Select logs to compare" message="Pick up to four logs from the same drone. The page overlays available FFT data and summarizes stored scores." />
         </section>
       ) : (
         <>
@@ -248,7 +250,7 @@ export function ComparePage() {
             </div>
 
             {fftChartData.length === 0 ? (
-              <EmptyState title="No FFT traces to overlay" body="The selected logs do not have stored FFT analysis yet." />
+              <EmptyState title="No FFT traces to overlay" message="The selected logs do not have stored FFT analysis yet." />
             ) : (
               <PlotlyChart
                 data={fftChartData}
