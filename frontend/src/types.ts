@@ -9,6 +9,7 @@ export interface Drone {
   prop_size: string | null
   weight_g: number | null
   notes: string | null
+  picture_url: string | null
   created_at: string
   updated_at: string
 }
@@ -21,6 +22,7 @@ export interface DroneFormValues {
   prop_size: string
   weight_g: string
   notes: string
+  picture: File | null
 }
 
 export interface DroneListResponse {

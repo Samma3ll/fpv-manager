@@ -17,6 +17,7 @@ const emptyForm: DroneFormValues = {
   prop_size: '',
   weight_g: '',
   notes: '',
+  picture: null,
 }
 
 /**
@@ -38,6 +39,7 @@ function toFormValues(drone?: Drone | null): DroneFormValues {
     prop_size: drone.prop_size ?? '',
     weight_g: drone.weight_g?.toString() ?? '',
     notes: drone.notes ?? '',
+    picture: null,
   }
 }
 
@@ -119,6 +121,11 @@ export function DroneFormDialog({ open, drone, onClose, onSubmit }: DroneFormDia
     setValues((current) => ({ ...current, [name]: value }))
   }
 
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null
+    setValues((current) => ({ ...current, picture: file }))
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="modal-panel" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
@@ -160,6 +167,11 @@ export function DroneFormDialog({ open, drone, onClose, onSubmit }: DroneFormDia
           <label className="full-span">
             <span>Notes</span>
             <textarea name="notes" value={values.notes} onChange={handleChange} rows={4} />
+          </label>
+          <label className="full-span">
+            <span>Picture</span>
+            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={handleFileChange} />
+            {values.picture ? <span className="file-hint">{values.picture.name}</span> : null}
           </label>
 
           {error ? <p className="inline-error full-span">{error}</p> : null}

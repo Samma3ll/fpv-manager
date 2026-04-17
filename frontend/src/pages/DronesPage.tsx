@@ -75,10 +75,17 @@ export function DronesPage() {
   }, [logs])
 
   async function handleSubmit(values: DroneFormValues) {
+    let droneId: number
     if (selectedDrone) {
       await client.updateDrone(selectedDrone.id, values)
+      droneId = selectedDrone.id
     } else {
-      await client.createDrone(values)
+      const created = await client.createDrone(values)
+      droneId = created.id
+    }
+
+    if (values.picture) {
+      await client.uploadDronePicture(droneId, values.picture)
     }
 
     await load()
@@ -142,6 +149,9 @@ export function DronesPage() {
 
               return (
                 <article className="drone-card" key={drone.id}>
+                  {drone.picture_url ? (
+                    <img className="drone-card-thumb" src={drone.picture_url} alt={drone.name} />
+                  ) : null}
                   <div className="drone-card-top">
                     <div>
                       <p className="eyebrow">{drone.frame_size ?? 'Unspecified frame'}</p>

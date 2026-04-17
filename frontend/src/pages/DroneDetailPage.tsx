@@ -153,6 +153,9 @@ export function DroneDetailPage() {
 
         {drone ? (
           <>
+            {drone.picture_url ? (
+              <img className="drone-detail-picture" src={drone.picture_url} alt={drone.name} />
+            ) : null}
             <div className="stats-grid compact">
               <StatCard label="Logs" value={logStats.total.toString()} />
               <StatCard label="Ready" value={logStats.ready.toString()} />
