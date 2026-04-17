@@ -44,6 +44,9 @@ class DroneResponse(DroneBase):
     """Schema for Drone response (with metadata)."""
 
     id: int = Field(..., description="Drone unique identifier")
+    picture_url: Optional[str] = Field(
+        None, description="API URL for drone picture retrieval"
+    )
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
