@@ -23,7 +23,7 @@ Manage drone telemetry logs in a CRM-like interface. Upload and analyze blackbox
 
 ### Prerequisites
 
-- Docker & Docker Compose (v2.0+)
+- Docker & Docker Compose (v2.24.0+)
 - Make (optional, but recommended for convenience)
 - ~8GB free disk space for logs and data
 

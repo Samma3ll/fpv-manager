@@ -25,6 +25,17 @@ help:
 	@echo ""
 
 up:
+	@echo "🔍 Checking Docker Compose version..."
+	@COMPOSE_VERSION=$$(docker compose version --short 2>/dev/null || echo "0.0.0"); \
+	REQUIRED_VERSION="2.24.0"; \
+	if printf '%s\n' "$$REQUIRED_VERSION" "$$COMPOSE_VERSION" | sort -V | head -n1 | grep -q "$$REQUIRED_VERSION"; then \
+		echo "✅ Docker Compose version $$COMPOSE_VERSION meets requirement (>=2.24.0)"; \
+	else \
+		echo "❌ ERROR: Docker Compose version $$COMPOSE_VERSION is too old."; \
+		echo "   This project requires Docker Compose v2.24.0+ for !override tag support."; \
+		echo "   Please upgrade Docker Compose and try again."; \
+		exit 1; \
+	fi
 	docker compose up -d
 	@echo "✅ Services starting. Check health with 'docker compose ps'"
 
