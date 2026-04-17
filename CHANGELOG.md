@@ -91,13 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All 6 services running and healthy (postgres, redis, minio, backend, worker, frontend)
 - Database automatically initialized by migrations on container startup
 
-### Planned
-
-#### Phase 6 - Frontend UI
+### Phase 6 - Frontend UI ✅
 - Drone management (CRUD)
 - Log management and upload
 - Analysis visualization with Plotly
 - Comparison view
+
+### Planned
 
 #### Phase 7 - Modularity & Plugins
 - Module registry system (foundations ready)
