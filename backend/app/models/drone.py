@@ -34,11 +34,19 @@ class Drone(Base):
     prop_size = Column(String(50), nullable=True)  # e.g., "5-inch", "6-inch"
     weight_g = Column(Float, nullable=True)  # grams
     notes = Column(Text, nullable=True)
+    picture_path = Column(String(512), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
     blackbox_logs = relationship("BlackboxLog", back_populates="drone", cascade="all, delete-orphan")
+
+    @property
+    def picture_url(self) -> str | None:
+        """Public API path for retrieving this drone's picture."""
+        if not self.picture_path:
+            return None
+        return f"/api/v1/drones/{self.id}/picture"
 
     def __repr__(self) -> str:
         return f"<Drone(id={self.id}, name='{self.name}')>"

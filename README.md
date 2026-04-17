@@ -144,6 +144,50 @@ This project follows a structured build plan in [plan.md](plan.md):
 - **Phase 8** — Docker & deployment polish
 - **Phase 9** — Testing & quality assurance
 
+## Blackbox Logging Checklist (Betaflight)
+
+Use this checklist to capture logs that are useful for tuning and analysis in FPV Manager.
+
+### 1) Betaflight options to enable
+
+In Betaflight Configurator:
+
+- **Configuration → Other Features → BLACKBOX**: enable
+- **Blackbox Device**: use **SD card** (preferred), or onboard flash if no SD slot
+- **Blackbox logging rate**: start with **1/2 gyro rate** (good balance of detail/file size)
+- **Debug mode**: keep at **NONE** for normal PID tuning logs (only change when troubleshooting a specific issue)
+- **Disable arming without logging** (if available): enable so flights are always recorded
+- Verify date/time and craft name are correct so logs are easy to identify later
+
+### 2) Pre-flight checks before recording
+
+- SD card/flash has enough free space
+- Battery is healthy and adequately charged
+- Props and frame are in good condition (no bent props / loose hardware)
+- Radio link quality and failsafe behavior are normal
+- Start from a known tune (save and note your current profile/rates)
+
+### 3) In-flight action checklist (record these on purpose)
+
+Try to capture each item in one or more packs:
+
+- [ ] **Steady hover** (10–15s) to observe baseline noise and drift
+- [ ] **Gentle pitch/roll moves** (small stick inputs) for basic response
+- [ ] **Sharp pitch/roll snaps** for step response and bounce-back detection
+- [ ] **Throttle punch-outs** (low to high throttle) for motor saturation behavior
+- [ ] **Fast throttle reductions** for propwash/oscillation behavior
+- [ ] **Yaw left/right snaps** to validate yaw authority and coupling
+- [ ] **Sustained turns / split-S style transitions** to capture real load conditions
+- [ ] **A short high-speed pass** for vibration/noise at speed
+- [ ] **Clean landing and disarm**
+
+### 4) After flight
+
+- Stop logging and save the log file(s)
+- Rename logs with a consistent format (for example: `date-quad-battery-tune-note.bbl`)
+- Note environmental conditions (wind, prop/battery used, major tune changes)
+- Upload the `.bbl` logs to FPV Manager and compare against previous flights
+
 ## Troubleshooting
 
 ### Services fail to start
