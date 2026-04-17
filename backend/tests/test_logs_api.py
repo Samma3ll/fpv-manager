@@ -19,23 +19,62 @@ from app.schemas import BlackboxLogUpdate
 
 
 def _scalar_result(value):
+    """
+    Create a MagicMock that simulates a SQLAlchemy result object for queries returning a single scalar.
+    
+    Parameters:
+        value: The value that the mocked `scalar_one_or_none()` call will return.
+    
+    Returns:
+        MagicMock: A mock object whose `scalar_one_or_none()` method returns `value`.
+    """
     result = MagicMock()
     result.scalar_one_or_none.return_value = value
     return result
 
 
 def _scalars_result(values):
+    """
+    Create a MagicMock that simulates a SQLAlchemy result whose `scalars().all()` returns the given values.
+    
+    Parameters:
+        values (Sequence): The sequence to be returned by `scalars().all()`.
+    
+    Returns:
+        MagicMock: A mock result configured so `result.scalars().all()` yields `values`.
+    """
     result = MagicMock()
     result.scalars.return_value.all.return_value = values
     return result
 
 
 def _sample_drone(drone_id=1):
+    """
+    Create a deterministic sample Drone instance for use in tests.
+    
+    Parameters:
+        drone_id (int): ID to assign to the created Drone (defaults to 1).
+    
+    Returns:
+        Drone: Drone with the given `id`, `name` set to "Drone {id}", and `created_at`/`updated_at` set to the current UTC time.
+    """
     now = datetime.now(timezone.utc)
     return Drone(id=drone_id, name=f"Drone {drone_id}", created_at=now, updated_at=now)
 
 
 def _sample_log(log_id=1, drone_id=1, status=LogStatus.PENDING):
+    """
+    Create a sample BlackboxLog instance for tests with deterministic identifiers and file metadata.
+    
+    Parameters:
+        log_id (int): ID to assign to the created log.
+        drone_id (int): Drone ID to assign and embed in the file_path.
+        status (LogStatus): Status to set on the log.
+    
+    Returns:
+        BlackboxLog: A BlackboxLog populated with `id`, `drone_id`, `file_name` "flight.bbl",
+        `file_path` "blackbox-logs/{drone_id}/flight.bbl", empty `tags`, and `created_at` set to now (UTC).
+    """
     return BlackboxLog(
         id=log_id,
         drone_id=drone_id,
@@ -55,6 +94,14 @@ async def test_upload_log_success_creates_entry_and_enqueues_task():
     file = UploadFile(filename="test.bbl", file=BytesIO(b"bbl-data"))
 
     async def refresh_side_effect(log_entry):
+        """
+        Populate a log entry with deterministic fields to simulate a database refresh.
+        
+        Sets the entry's `id` to 77, updates `created_at` to the current UTC datetime, and ensures `tags` is an empty list if it was None.
+        
+        Parameters:
+            log_entry: The log object to modify in-place.
+        """
         log_entry.id = 77
         log_entry.created_at = datetime.now(timezone.utc)
         if log_entry.tags is None:

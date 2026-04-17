@@ -16,18 +16,46 @@ from app.schemas import DroneCreate, DroneUpdate
 
 
 def _result_with_scalar(value):
+    """
+    Create a MagicMock whose `scalar_one_or_none()` call returns the provided value.
+    
+    Parameters:
+        value: The object to be returned when `scalar_one_or_none()` is invoked on the mock.
+    
+    Returns:
+        MagicMock: A mock with `scalar_one_or_none().return_value` set to `value`.
+    """
     result = MagicMock()
     result.scalar_one_or_none.return_value = value
     return result
 
 
 def _result_with_scalars(values):
+    """
+    Create a MagicMock configured so its scalars().all() call returns the given values.
+    
+    Parameters:
+        values (Sequence): Sequence of values to be returned by result.scalars().all()
+    
+    Returns:
+        MagicMock: Mock object where calling `scalars().all()` yields `values`.
+    """
     result = MagicMock()
     result.scalars.return_value.all.return_value = values
     return result
 
 
 def _sample_drone(drone_id=1, name="Demo Drone"):
+    """
+    Create a Drone instance for tests with current UTC creation and update timestamps.
+    
+    Parameters:
+        drone_id (int): ID to assign to the returned Drone.
+        name (str): Name to assign to the returned Drone.
+    
+    Returns:
+        Drone: Instance with `id` and `name` set as provided and `created_at`/`updated_at` set to the current UTC time.
+    """
     now = datetime.now(timezone.utc)
     return Drone(
         id=drone_id,
@@ -43,6 +71,12 @@ async def test_create_drone_creates_and_returns_response():
     session.add = MagicMock()
 
     async def refresh_side_effect(drone):
+        """
+        Mutates the given drone instance by assigning an id and current UTC created/updated timestamps.
+        
+        Parameters:
+            drone: The drone model instance to update in place; should accept attributes `id`, `created_at`, and `updated_at`.
+        """
         drone.id = 12
         drone.created_at = datetime.now(timezone.utc)
         drone.updated_at = datetime.now(timezone.utc)
