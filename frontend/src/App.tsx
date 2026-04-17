@@ -123,19 +123,24 @@ export function App() {
       const createdDrone: Drone = await createResponse.json()
 
       if (pictureFile) {
-        const pictureData = new FormData()
-        pictureData.append('file', pictureFile)
+        try {
+          const pictureData = new FormData()
+          pictureData.append('file', pictureFile)
 
-        const uploadResponse = await fetch(
-          `${API_BASE}/api/v1/drones/${createdDrone.id}/picture`,
-          {
-            method: 'POST',
-            body: pictureData,
-          },
-        )
+          const uploadResponse = await fetch(
+            `${API_BASE}/api/v1/drones/${createdDrone.id}/picture`,
+            {
+              method: 'POST',
+              body: pictureData,
+            },
+          )
 
-        if (!uploadResponse.ok) {
-          throw new Error(`Drone created, but picture upload failed (${uploadResponse.status})`)
+          if (!uploadResponse.ok) {
+            setError(`Drone created, but picture upload failed (${uploadResponse.status})`)
+          }
+        } catch (uploadErr) {
+          const message = uploadErr instanceof Error ? uploadErr.message : 'Picture upload failed'
+          setError(`Drone created, but ${message}`)
         }
       }
 
@@ -252,8 +257,8 @@ export function App() {
                 <ul>
                   {drone.frame_size && <li>Frame: {drone.frame_size}</li>}
                   {drone.prop_size && <li>Props: {drone.prop_size}</li>}
-                  {drone.motor_kv && <li>Motor KV: {drone.motor_kv}</li>}
-                  {drone.weight_g && <li>Weight: {drone.weight_g}g</li>}
+                  {drone.motor_kv != null && <li>Motor KV: {drone.motor_kv}</li>}
+                  {drone.weight_g != null && <li>Weight: {drone.weight_g}g</li>}
                 </ul>
                 {drone.notes && <p className="notes">{drone.notes}</p>}
               </article>

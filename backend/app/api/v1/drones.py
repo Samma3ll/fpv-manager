@@ -20,6 +20,7 @@ router = APIRouter(prefix="/drones", tags=["drones"])
 logger = logging.getLogger(__name__)
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 @router.post(
@@ -107,7 +108,24 @@ async def upload_drone_picture(
             detail=f"Drone with ID {drone_id} not found",
         )
 
-    content = await file.read()
+    # Stream-read the file in chunks to enforce max upload size
+    content_chunks = []
+    total_bytes = 0
+    CHUNK_SIZE = 64 * 1024  # 64 KB chunks
+
+    while True:
+        chunk = await file.read(CHUNK_SIZE)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Uploaded image exceeds maximum size of {MAX_UPLOAD_BYTES} bytes",
+            )
+        content_chunks.append(chunk)
+
+    content = b"".join(content_chunks)
     if not content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -121,17 +139,31 @@ async def upload_drone_picture(
             object_name=new_object_key,
             file_content=content,
         )
-    except S3Error:
+    except S3Error as err:
         logger.exception("Failed to upload drone picture to object storage")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload drone picture",
-        )
+        ) from err
 
     old_picture = drone.picture_path
     drone.picture_path = new_object_key
-    await session.commit()
-    await session.refresh(drone)
+    try:
+        await session.commit()
+        await session.refresh(drone)
+    except Exception:
+        # Best-effort cleanup: delete the just-uploaded object
+        try:
+            minio_client.delete_file(
+                bucket=minio_client.bucket_assets,
+                object_name=new_object_key,
+            )
+        except Exception:
+            logger.warning("Failed to cleanup uploaded object after commit failure: %s", new_object_key)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update drone record",
+        )
 
     if old_picture:
         try:
@@ -175,12 +207,12 @@ async def get_drone_picture(
             bucket=minio_client.bucket_assets,
             object_name=drone.picture_path,
         )
-    except S3Error:
+    except S3Error as err:
         logger.exception("Failed to download drone picture from object storage")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve drone picture",
-        )
+        ) from err
 
     media_type = mimetypes.guess_type(drone.picture_path)[0] or "application/octet-stream"
     return Response(content=content, media_type=media_type)
