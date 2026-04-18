@@ -11,7 +11,7 @@ import math
 
 from app.core.database import get_sync_session_factory
 from app.core.minio import minio_client
-from app.models import BlackboxLog, LogStatus
+from app.models import BlackboxLog, LogStatus, Module
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -238,7 +238,7 @@ def run_all_analyses(self, log_id: int):
     
     Parameters:
         log_id (int): Primary key of the BlackboxLog to analyze
-    
+
     Returns:
         dict: Summary with keys:
             - `log_id`: the analyzed log id
@@ -247,7 +247,15 @@ def run_all_analyses(self, log_id: int):
             - on error: `error` (error message)
     """
     logger.info(f"Starting all analyses for log {log_id}")
-    
+
+    # Map of module name -> (import_path, function_name)
+    ANALYSIS_REGISTRY = {
+        "step_response": ("app.analysis.step_response", "analyze_step_response"),
+        "fft_noise": ("app.analysis.fft_noise", "analyze_fft_noise"),
+        "pid_error": ("app.analysis.pid_error", "analyze_pid_error"),
+        "motor_analysis": ("app.analysis.motor_analysis", "analyze_motor_output"),
+    }
+
     session_factory = get_sync_session_factory()
     with session_factory() as session:
         # Fetch log entry
@@ -259,7 +267,14 @@ def run_all_analyses(self, log_id: int):
         if not log_entry:
             logger.error(f"Log entry {log_id} not found")
             return {"log_id": log_id, "status": "error", "message": "Log entry not found"}
-        
+
+        # Query enabled analysis modules from the Module table
+        enabled_modules = session.execute(
+            select(Module).where(Module.enabled == True, Module.module_type == "analysis")  # noqa: E712
+        ).scalars().all()
+        enabled_names = {m.name for m in enabled_modules}
+        logger.info(f"Enabled analysis modules: {enabled_names}")
+
         try:
             # Download file
             logger.info(f"Downloading log file for analysis: {log_entry.file_path}")
@@ -365,12 +380,16 @@ def run_all_analyses(self, log_id: int):
             # Delete any existing analyses for this log
             session.query(LogAnalysis).filter(LogAnalysis.log_id == log_id).delete()
             
-            # Add new analyses
-            for analysis in analyses:
-                session.add(analysis)
-            
+            for module_name, raw_result in analysis_results.items():
+                sanitized = sanitize_for_json(raw_result)
+                session.add(LogAnalysis(
+                    log_id=log_id,
+                    module=module_name,
+                    result_json=sanitized,
+                ))
+
             session.commit()
-            logger.info(f"Stored all analyses for log {log_id}")
+            logger.info(f"Stored {len(analysis_results)} analyses for log {log_id}")
             
             return {
                 "log_id": log_id,
@@ -396,8 +415,6 @@ def run_all_analyses(self, log_id: int):
                 log_entry = result.scalar_one_or_none()
                 if log_entry:
                     log_entry.error_message = f"Analysis failed: {str(e)[:255]}"
-                    # Note: BlackboxLog doesn't have an ANALYSIS_ERROR status,
-                    # so we keep it as is or use ERROR if appropriate
                     session.commit()
             except Exception as update_error:
                 logger.error(f"Failed to update log error status: {update_error}")

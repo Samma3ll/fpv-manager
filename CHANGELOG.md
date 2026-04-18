@@ -97,21 +97,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Analysis visualization with Plotly
 - Comparison view
 
+### Phase 7 - Modularity & Plugin Architecture ✅
+- **Module DB model**: Added `analysis_task` and `frontend_route` columns for runtime discovery
+- **Modules API**: `GET /api/v1/modules` (list, filter by type/enabled), `GET /api/v1/modules/{id}`, `PATCH /api/v1/modules/{id}` (enable/disable, update config)
+- **Pydantic schemas**: `ModuleResponse`, `ModuleUpdate`, `ModuleListResponse`
+- **Dynamic analysis dispatch**: `run_all_analyses` queries the Module table for enabled analysis modules instead of hardcoding
+  - Analysis registry maps module names to importable functions
+  - Skips disabled modules, logs per-module errors without aborting the run
+- **Dynamic frontend tabs**: LogDetailPage fetches enabled modules from `/api/v1/modules` and renders analysis tabs dynamically
+  - Falls back to hardcoded tabs if the modules API is unreachable
+- **Future module stubs** registered (disabled by default):
+  - `video` — Attach DVR footage to a flight log
+  - `betaflight_backup` — Store and diff Betaflight CLI dumps per drone
+  - `gps_track` — GPX map view for GPS-equipped quads
+- **Migration**: `005_module_plugin_fields.py` — adds columns, backfills existing modules, seeds stubs
+- **Documentation**: README guide for adding custom analysis modules/plugins
+
 ### Planned
 
-#### Phase 7 - Modularity & Plugins
-- Module registry system (foundations ready)
-- Plugin architecture for future extensibility
-- Enable/disable modules dynamically
-- Custom analysis modules
+#### Phase 8 - Analysis & Scoring Enhancements
+- Additional analysis metrics (e.g., control effort, stability margins)
+- Machine learning-based tune quality prediction
+- User feedback integration for scoring adjustments
+- better visualization of analysis results (e.g., interactive plots, heatmaps)
+- Expand the comparison view to show side-by-side analysis of multiple logs with radar charts, bar graphs, and detailed metric breakdowns
 
-#### Phase 8 - Docker & Deployment
+#### Phase 9 - Docker & Deployment
 - Production-ready Docker configuration
 - nginx reverse proxy
 - Health checks
-- Documentation
 
-#### Phase 9 - Testing & Quality
+#### Phase 10 - Testing & Quality
 - pytest for backend
 - Vitest for frontend
 - End-to-end testing

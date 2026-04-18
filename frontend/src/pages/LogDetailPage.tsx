@@ -6,9 +6,9 @@ import { StatusBadge } from '../components/StatusBadge'
 import { StatCard } from '../components/StatCard'
 import { client } from '../lib/api'
 import { formatDate, formatDuration, formatNumber } from '../lib/format'
-import type { AnalysesResponse, AxisMetrics, BlackboxLog } from '../types'
+import type { AnalysesResponse, AxisMetrics, BlackboxLog, Module } from '../types'
 
-const moduleTabs = [
+const FALLBACK_TABS = [
   { key: 'step_response', label: 'Step Response' },
   { key: 'fft_noise', label: 'FFT Noise' },
   { key: 'pid_error', label: 'PID Error' },
@@ -37,13 +37,11 @@ function axisNames(result: Record<string, unknown>) {
 }
 
 /**
- * Page component that displays a log's metadata and available analysis results.
+ * Displays a log's metadata and available analysis results in an overview and tabbed analysis panels.
  *
- * Loads the log and its analyses using the `logId` route parameter, exposes UI for
- * selecting analysis tabs (step response, FFT noise, PID error, motor analysis, tune score),
- * and polls the server every 5 seconds while the log status is `pending` or `processing`.
+ * Polls the server while the log status is `pending` or `processing`.
  *
- * @returns The rendered React element for the log detail page containing the overview card and analysis tabs.
+ * @returns The React element for the log detail page.
  */
 export function LogDetailPage() {
   const params = useParams()
@@ -51,11 +49,27 @@ export function LogDetailPage() {
 
   const [log, setLog] = useState<BlackboxLog | null>(null)
   const [analyses, setAnalyses] = useState<AnalysesResponse>({})
+  const [modules, setModules] = useState<Module[]>([])
   const [activeTab, setActiveTab] = useState('step_response')
   const [fftAxis, setFftAxis] = useState<'roll' | 'pitch' | 'yaw'>('roll')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Derive tabs from modules API (enabled analysis modules with a frontend_route)
+  const moduleTabs = useMemo(() => {
+    const dynamicTabs = modules
+      .filter((m) => m.enabled && m.module_type === 'analysis' && m.frontend_route)
+      .map((m) => ({ key: m.frontend_route!, label: m.display_name }))
+
+    return dynamicTabs.length > 0 ? dynamicTabs : FALLBACK_TABS
+  }, [modules])
+
+  /**
+   * Loads log metadata, associated analyses, and available modules into component state.
+   *
+   * @param initial - When true, toggles the component loading indicator while the request runs
+   * @returns Nothing; results are applied to component state (`log`, `analyses`, `modules`, and `error`)
+   */
   async function load(initial = true) {
     if (!Number.isFinite(logId)) {
       return
@@ -65,6 +79,7 @@ export function LogDetailPage() {
       setLoading(true)
     }
     try {
+      // Fetch log and analyses together
       const [logResponse, analysesResponse] = await Promise.all([
         client.getLog(logId),
         client.getAnalyses(logId),
@@ -73,6 +88,15 @@ export function LogDetailPage() {
       setLog(logResponse)
       setAnalyses(analysesResponse)
       setError(null)
+
+      // Fetch modules separately with error handling to prevent blocking page render
+      try {
+        const modulesResponse = await client.listModules(true)
+        setModules(modulesResponse.items)
+      } catch (modulesError) {
+        console.error('Failed to load modules:', modulesError)
+        setModules([])
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load log.')
     } finally {
@@ -104,7 +128,14 @@ export function LogDetailPage() {
 
   const availableTabs = useMemo(() => {
     return moduleTabs.filter((tab) => analyses[tab.key] || tab.key === 'step_response' || tab.key === 'fft_noise')
-  }, [analyses])
+  }, [analyses, moduleTabs])
+
+  // Synchronize activeTab when availableTabs changes
+  useEffect(() => {
+    if (availableTabs.length > 0 && !availableTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(availableTabs[0].key)
+    }
+  }, [availableTabs, activeTab])
 
   if (!Number.isFinite(logId)) {
     return <section className="section-card"><p className="inline-error">Invalid log id.</p></section>
@@ -289,6 +320,20 @@ export function LogDetailPage() {
     )
   }
 
+  function renderGenericPlugin() {
+    const currentAnalysis = analyses[activeTab]
+    if (!currentAnalysis?.result) {
+      return <EmptyState title="Analysis unavailable" body={`The ${activeTab} analysis is not ready yet.`} />
+    }
+    return (
+      <div className="section-card">
+        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {JSON.stringify(currentAnalysis.result, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+
   return (
     <section className="page-grid">
       <section className="section-card">
@@ -354,6 +399,13 @@ export function LogDetailPage() {
         {activeTab === 'pid_error' ? renderPidError() : null}
         {activeTab === 'motor_analysis' ? renderMotors() : null}
         {activeTab === 'tune_score' ? renderTuneScore() : null}
+        {activeTab !== 'step_response' &&
+         activeTab !== 'fft_noise' &&
+         activeTab !== 'pid_error' &&
+         activeTab !== 'motor_analysis' &&
+         activeTab !== 'tune_score'
+          ? renderGenericPlugin()
+          : null}
       </section>
     </section>
   )

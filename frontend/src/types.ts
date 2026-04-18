@@ -67,6 +67,24 @@ export interface AnalysisRecord {
 
 export type AnalysesResponse = Record<string, AnalysisRecord>
 
+export interface Module {
+  id: number
+  name: string
+  display_name: string
+  description: string | null
+  enabled: boolean
+  module_type: string
+  analysis_task: string | null
+  frontend_route: string | null
+  config_json: Record<string, unknown>
+  created_at: string
+}
+
+export interface ModuleListResponse {
+  items: Module[]
+  total: number
+}
+
 export interface AxisMetrics {
   rise_time_ms?: number
   overshoot_pct?: number

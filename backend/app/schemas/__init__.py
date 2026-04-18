@@ -7,6 +7,7 @@ from .blackbox_log import (
     BlackboxLogListResponse,
     BlackboxLogUpdate,
 )
+from .module import ModuleResponse, ModuleUpdate, ModuleListResponse
 
 __all__ = [
     "DroneCreate",
@@ -17,4 +18,7 @@ __all__ = [
     "BlackboxLogResponse",
     "BlackboxLogListResponse",
     "BlackboxLogUpdate",
+    "ModuleResponse",
+    "ModuleUpdate",
+    "ModuleListResponse",
 ]

@@ -136,13 +136,14 @@ This project follows a structured build plan in [plan.md](plan.md):
 
 - **Phase 1** ✅ — Project scaffold & infrastructure
 - **Phase 2** ✅ — Database schema & ORM models with Alembic
-- **Phase 3** — Backend API (CRUD endpoints)
-- **Phase 4** — Log parsing worker
-- **Phase 5** — Analysis modules (step response, FFT, PID error, motors)
-- **Phase 6** — Frontend UI (drones, logs, analysis charts)
-- **Phase 7** — Modularity & plugin architecture
-- **Phase 8** — Docker & deployment polish
-- **Phase 9** — Testing & quality assurance
+- **Phase 3** ✅ — Backend API (CRUD endpoints)
+- **Phase 4** ✅ — Log parsing worker (orangebox + MinIO + Celery)
+- **Phase 5** ✅ — Analysis modules (step response, FFT, PID error, motors, tune score)
+- **Phase 6** ✅ — Frontend UI (drones, logs, analysis charts, comparison view)
+- **Phase 7** ✅ — Modularity & plugin architecture
+- **Phase 8** — Analysis & scoring enhancements
+- **Phase 9** — Docker & deployment polish
+- **Phase 10** — Testing & quality assurance
 
 ## Blackbox Logging Checklist (Betaflight)
 
@@ -235,15 +236,202 @@ make clean           # Prune unused Docker resources
 make help            # Show all commands
 ```
 
+## Adding a Module / Plugin
+
+The plugin architecture lets you add new analysis modules that automatically integrate with the worker pipeline and frontend UI. Each module is a row in the `modules` database table, an analysis function in the backend, and a render function in the frontend.
+
+### Architecture Overview
+
+```
+Module table (DB)          ← runtime registry (enable/disable, config)
+    ↓
+ANALYSIS_REGISTRY (dict)   ← maps module name → Python function
+    ↓
+run_all_analyses (Celery)  ← dispatches to enabled modules
+    ↓
+LogAnalysis table (DB)     ← stores result_json per module per log
+    ↓
+LogDetailPage (React)      ← renders tabs from enabled modules
+```
+
+### Step 1 — Create the analysis function
+
+Create `backend/app/analysis/my_module.py`. Every analysis function receives an `orangebox.Parser` and returns a `Dict[str, Any]`:
+
+```python
+"""My custom analysis module."""
+from typing import Any, Dict
+from app.analysis.utils import extract_field_data, get_time_array
+
+def analyze_my_module(parser) -> Dict[str, Any]:
+    """Analyze blackbox log data for my custom metric."""
+    time = get_time_array(parser)
+    if time is None:
+        return {"error": "No time data available"}
+
+    # Extract fields you need (see parser.field_names for available fields)
+    gyro_roll = extract_field_data(parser, "gyroADC[0]")
+
+    # ... your analysis logic ...
+
+    return {
+        "roll": {"metric_a": 1.23, "metric_b": 4.56},
+        "pitch": {"metric_a": 2.34, "metric_b": 5.67},
+    }
+```
+
+Use helpers from `backend/app/analysis/utils.py`:
+- `extract_field_data(parser, field_name)` — single field → `np.ndarray`
+- `extract_fields(parser, field_names)` — multiple fields in one pass
+- `get_time_array(parser)` — frame timestamps in seconds
+- `calculate_stats(signal)` — `{mean, std, min, max, rms, peak}`
+- `find_peaks(signal, threshold)` — peak indices and values
+
+### Step 2 — Register in the analysis registry
+
+In [backend/app/workers/tasks.py](backend/app/workers/tasks.py), add your module to `ANALYSIS_REGISTRY`:
+
+```python
+ANALYSIS_REGISTRY = {
+    "step_response":  ("app.analysis.step_response",  "analyze_step_response"),
+    "fft_noise":      ("app.analysis.fft_noise",      "analyze_fft_noise"),
+    "pid_error":      ("app.analysis.pid_error",      "analyze_pid_error"),
+    "motor_analysis": ("app.analysis.motor_analysis",  "analyze_motor_output"),
+    "my_module":      ("app.analysis.my_module",       "analyze_my_module"),  # ← add
+}
+```
+
+The `run_all_analyses` task will automatically call your function for every log if the module is enabled in the database.
+
+### Step 3 — Write a database migration
+
+Generate a new Alembic migration to seed your module row:
+
+```bash
+docker compose exec backend alembic revision -m "add_my_module"
+```
+
+Then edit the generated file:
+
+```python
+from alembic import op
+import sqlalchemy as sa
+from datetime import datetime
+
+def upgrade():
+    modules = sa.table(
+        "modules",
+        sa.column("name", sa.String),
+        sa.column("display_name", sa.String),
+        sa.column("description", sa.Text),
+        sa.column("enabled", sa.Boolean),
+        sa.column("module_type", sa.String),
+        sa.column("analysis_task", sa.String),
+        sa.column("frontend_route", sa.String),
+        sa.column("config_json", sa.JSON),
+        sa.column("created_at", sa.DateTime),
+    )
+    op.bulk_insert(modules, [
+        {
+            "name": "my_module",
+            "display_name": "My Custom Analysis",
+            "description": "Description shown in the modules list",
+            "enabled": True,
+            "module_type": "analysis",
+            "analysis_task": "analyze_log_my_module",
+            "frontend_route": "my_module",
+            "config_json": {},
+            "created_at": datetime.utcnow(),
+        },
+    ])
+
+def downgrade():
+    op.execute("DELETE FROM modules WHERE name = 'my_module'")
+```
+
+Apply it:
+
+```bash
+docker compose exec backend alembic upgrade head
+```
+
+### Step 4 — Add a frontend tab
+
+In [frontend/src/pages/LogDetailPage.tsx](frontend/src/pages/LogDetailPage.tsx), add a render function for your tab:
+
+```tsx
+const renderMyModule = () => {
+  const data = analyses.find((a) => a.module === 'my_module')
+  if (!data) return <p>No data available</p>
+  const result = data.result_json
+
+  return (
+    <div>
+      {/* Render your analysis results — tables, Plotly charts, etc. */}
+      <pre>{JSON.stringify(result, null, 2)}</pre>
+    </div>
+  )
+}
+```
+
+Then wire it into the tab content switch:
+
+```tsx
+{activeTab === 'my_module' && renderMyModule()}
+```
+
+The tab button itself is created automatically — the frontend reads enabled modules from `GET /api/v1/modules` and builds tabs from each module's `frontend_route` and `display_name`.
+
+### Step 5 (optional) — Standalone Celery task
+
+If you want to re-run your analysis independently (without re-running all modules):
+
+```python
+@celery_app.task(name="analyze_log_my_module", bind=True, max_retries=3)
+def analyze_log_my_module(self, log_id: int):
+    # Download log, parse, call analyze_my_module(), store result
+    ...
+```
+
+### Module fields reference
+
+| Column | Type | Purpose |
+|---|---|---|
+| `name` | `String(100)` | Unique machine key (e.g. `"my_module"`) |
+| `display_name` | `String(255)` | Human-readable label shown in UI |
+| `description` | `Text` | Shown in module list / settings |
+| `enabled` | `Boolean` | Toggle on/off at runtime via API |
+| `module_type` | `String(50)` | `"analysis"`, `"storage"`, or `"utility"` |
+| `analysis_task` | `String(255)` | Celery task name for standalone execution |
+| `frontend_route` | `String(255)` | Tab key the frontend matches on |
+| `config_json` | `JSON` | Module-specific settings (editable via API) |
+
+### Managing modules at runtime
+
+```bash
+# List all modules
+curl http://localhost:8000/api/v1/modules
+
+# Disable a module
+curl -X PATCH http://localhost:8000/api/v1/modules/6 \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+
+# Update module config
+curl -X PATCH http://localhost:8000/api/v1/modules/6 \
+  -H "Content-Type: application/json" \
+  -d '{"config_json": {"threshold": 0.5}}'
+```
+
+Disabled modules are skipped during `run_all_analyses` and their tabs are hidden in the frontend.
+
 ## Next Steps
 
-After Phase 1 verification, proceed to:
+See [plan.md](plan.md) for the detailed build checklist. Current priorities:
 
-1. **Phase 2** — Design database schema (Drone, BlackboxLog, LogAnalysis models)
-2. **Phase 3** — Implement FastAPI CRUD endpoints for drones and log management
-3. **Phase 4** — Build the log parsing worker with orangebox library
-
-See [plan.md](plan.md) for detailed build checklist.
+1. **Phase 8** — Enhanced analysis metrics, ML-based scoring, better visualizations
+2. **Phase 9** — Production Docker hardening
+3. **Phase 10** — Comprehensive test suite
 
 ## License
 
