@@ -6,9 +6,9 @@ import { StatusBadge } from '../components/StatusBadge'
 import { StatCard } from '../components/StatCard'
 import { client } from '../lib/api'
 import { formatDate, formatDuration, formatNumber } from '../lib/format'
-import type { AnalysesResponse, AxisMetrics, BlackboxLog } from '../types'
+import type { AnalysesResponse, AxisMetrics, BlackboxLog, Module } from '../types'
 
-const moduleTabs = [
+const FALLBACK_TABS = [
   { key: 'step_response', label: 'Step Response' },
   { key: 'fft_noise', label: 'FFT Noise' },
   { key: 'pid_error', label: 'PID Error' },
@@ -51,10 +51,20 @@ export function LogDetailPage() {
 
   const [log, setLog] = useState<BlackboxLog | null>(null)
   const [analyses, setAnalyses] = useState<AnalysesResponse>({})
+  const [modules, setModules] = useState<Module[]>([])
   const [activeTab, setActiveTab] = useState('step_response')
   const [fftAxis, setFftAxis] = useState<'roll' | 'pitch' | 'yaw'>('roll')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Derive tabs from modules API (enabled analysis modules with a frontend_route)
+  const moduleTabs = useMemo(() => {
+    const dynamicTabs = modules
+      .filter((m) => m.enabled && m.module_type === 'analysis' && m.frontend_route)
+      .map((m) => ({ key: m.frontend_route!, label: m.display_name }))
+
+    return dynamicTabs.length > 0 ? dynamicTabs : FALLBACK_TABS
+  }, [modules])
 
   async function load(initial = true) {
     if (!Number.isFinite(logId)) {
@@ -65,13 +75,15 @@ export function LogDetailPage() {
       setLoading(true)
     }
     try {
-      const [logResponse, analysesResponse] = await Promise.all([
+      const [logResponse, analysesResponse, modulesResponse] = await Promise.all([
         client.getLog(logId),
         client.getAnalyses(logId),
+        client.listModules(true),
       ])
 
       setLog(logResponse)
       setAnalyses(analysesResponse)
+      setModules(modulesResponse.items)
       setError(null)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load log.')
@@ -104,7 +116,7 @@ export function LogDetailPage() {
 
   const availableTabs = useMemo(() => {
     return moduleTabs.filter((tab) => analyses[tab.key] || tab.key === 'step_response' || tab.key === 'fft_noise')
-  }, [analyses])
+  }, [analyses, moduleTabs])
 
   if (!Number.isFinite(logId)) {
     return <section className="section-card"><p className="inline-error">Invalid log id.</p></section>

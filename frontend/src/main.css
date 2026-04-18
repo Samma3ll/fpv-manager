@@ -710,3 +710,73 @@ h2 {
   color: #ff6b6b;
   font-weight: 600;
 }
+
+/* Settings / Module management */
+.module-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.module-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1rem 1.1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.module-info {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.module-info strong {
+  font-size: 1rem;
+}
+
+.toggle-button {
+  position: relative;
+  flex-shrink: 0;
+  width: 52px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+  transition: background 200ms ease, border-color 200ms ease;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.toggle-button.on {
+  background: linear-gradient(135deg, var(--accent), #ffb25e);
+  border-color: rgba(255, 138, 61, 0.5);
+}
+
+.toggle-button.off {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.toggle-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f1f0ea;
+  transition: transform 200ms ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.toggle-button.on .toggle-knob {
+  transform: translateX(24px);
+}

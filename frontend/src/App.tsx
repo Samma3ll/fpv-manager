@@ -6,6 +6,7 @@ import { DroneDetailPage } from './pages/DroneDetailPage'
 import { DronesPage } from './pages/DronesPage'
 import { LogDetailPage } from './pages/LogDetailPage'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 /**
  * Defines the application's client-side routing tree and layout.
@@ -26,6 +27,7 @@ export function App() {
         <Route path="/drones/:droneId" element={<DroneDetailPage />} />
         <Route path="/logs/:logId" element={<LogDetailPage />} />
         <Route path="/compare" element={<ComparePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/home" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

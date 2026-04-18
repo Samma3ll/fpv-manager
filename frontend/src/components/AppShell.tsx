@@ -42,6 +42,7 @@ const navigation = [
   { to: '/', label: 'Overview', end: true },
   { to: '/drones', label: 'Drones' },
   { to: '/compare', label: 'Compare' },
+  { to: '/settings', label: 'Settings' },
 ]
 
 /**
@@ -79,8 +80,8 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar-note">
-          <p>Future slots</p>
-          <span>Settings and module management will land in Phase 7.</span>
+          <p>Modular</p>
+          <span>Enable or disable analysis modules and plugins in Settings.</span>
         </div>
       </aside>
 
