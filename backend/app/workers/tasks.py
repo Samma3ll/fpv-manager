@@ -229,16 +229,22 @@ def parse_blackbox_log(self, log_id: int):
 @shared_task(bind=True, name="run_all_analyses", max_retries=3)
 def run_all_analyses(self, log_id: int):
     """
-    Run all enabled analysis modules for a BlackboxLog and persist their sanitized results.
-
-    Queries the Module table for enabled analysis modules, runs each one dynamically,
-    then computes and stores the tune score. Replaces any existing LogAnalysis rows.
-
+    Run all configured analyses for a BlackboxLog and persist their sanitized results.
+    
+    Downloads the log, builds a parser, loads enabled analysis modules from the
+    Module table, runs only enabled analyses, computes tune_score only when that
+    module is enabled, replaces any existing LogAnalysis rows for the log with
+    newly generated results, and commits.
+    
     Parameters:
         log_id (int): Primary key of the BlackboxLog to analyze
 
     Returns:
-        dict: Summary with log_id, status, tune_score, and modules_analyzed count.
+        dict: Summary with keys:
+            - `log_id`: the analyzed log id
+            - `status`: `"success"` or `"error"`
+            - on success: `tune_score` (the tune overall_score or 0) and `modules_analyzed`
+            - on error: `error` (error message)
     """
     logger.info(f"Starting all analyses for log {log_id}")
 
@@ -281,58 +287,95 @@ def run_all_analyses(self, log_id: int):
             from app.analysis.utils import load_parser_from_file_content
             parser = load_parser_from_file_content(file_content)
             
-            # Run enabled analyses dynamically
-            logger.info(f"Running analyses for log {log_id}")
-            import importlib
+            # Load enabled analysis modules
+            from app.models import Module
+            enabled_modules_result = session.execute(
+                select(Module.name).where(
+                    Module.enabled.is_(True),
+                    Module.module_type == "analysis",
+                )
+            )
+            enabled_module_names = set(enabled_modules_result.scalars().all())
 
+            logger.info(
+                "Running enabled analyses for log %s: %s",
+                log_id,
+                sorted(enabled_module_names),
+            )
+            
+            from app.analysis.step_response import analyze_step_response
+            from app.analysis.fft_noise import analyze_fft_noise
+            from app.analysis.pid_error import analyze_pid_error
+            from app.analysis.motor_analysis import analyze_motor_output
+            from app.analysis.tune_score import score_tune_quality
+            
+            analysis_registry = {
+                "step_response": lambda: analyze_step_response(parser),
+                "fft_noise": lambda: analyze_fft_noise(parser),
+                "pid_error": lambda: analyze_pid_error(parser),
+                "motor_analysis": lambda: analyze_motor_output(parser),
+            }
+
+            # Store successful results for prerequisite reuse
             analysis_results = {}
-            for module_name, (import_path, func_name) in ANALYSIS_REGISTRY.items():
-                if module_name not in enabled_names:
-                    logger.info(f"Skipping disabled module: {module_name}")
-                    continue
-                try:
-                    mod = importlib.import_module(import_path)
-                    func = getattr(mod, func_name)
-                    analysis_results[module_name] = func(parser)
-                    logger.info(f"Completed analysis: {module_name}")
-                except Exception as mod_err:
-                    logger.error(f"Module {module_name} failed: {mod_err}", exc_info=True)
-                    analysis_results[module_name] = {"error": str(mod_err)[:255]}
 
-            # Calculate tune score if enabled and we have the required inputs
-            tune_score_result = {}
-            if "tune_score" in enabled_names:
-                # Validate that all prerequisite modules are present and valid
-                prerequisites = ["step_response", "fft_noise", "pid_error", "motor_analysis"]
-                missing = []
-                for prereq in prerequisites:
-                    prereq_result = analysis_results.get(prereq)
-                    # Check if result is missing, empty dict, or contains an error
-                    if not prereq_result or (isinstance(prereq_result, dict) and ("error" in prereq_result or not prereq_result)):
-                        missing.append(prereq)
-
-                if missing:
-                    logger.warning(f"Skipping tune score: missing or errored prerequisites {missing}")
-                    tune_score_result = {
-                        "skipped": "missing prerequisites",
-                        "missing": missing,
-                    }
-                else:
-                    try:
-                        from app.analysis.tune_score import score_tune_quality
-                        tune_score_result = score_tune_quality(
-                            analysis_results.get("step_response", {}),
-                            analysis_results.get("fft_noise", {}),
-                            analysis_results.get("pid_error", {}),
-                            analysis_results.get("motor_analysis", {}),
-                        )
-                    except Exception as ts_err:
-                        logger.error(f"Tune score failed: {ts_err}", exc_info=True)
-                        tune_score_result = {"error": str(ts_err)[:255]}
-                analysis_results["tune_score"] = tune_score_result
-
-            # Sanitize and store all results
+            # Store all results in database
             from app.models import LogAnalysis
+
+            analyses = []
+            for module_name, analyzer in analysis_registry.items():
+                if module_name not in enabled_module_names:
+                    continue
+
+                try:
+                    module_result = sanitize_for_json(analyzer())
+                    analysis_results[module_name] = module_result
+                    analyses.append(
+                        LogAnalysis(
+                            log_id=log_id,
+                            module=module_name,
+                            result_json=module_result,
+                        )
+                    )
+                except Exception as module_error:
+                    logger.warning(
+                        "Analysis module '%s' failed for log %s: %s",
+                        module_name,
+                        log_id,
+                        module_error,
+                    )
+
+            tune_score_value = 0
+            if "tune_score" in enabled_module_names:
+                try:
+                    tune_score_result = score_tune_quality(
+                        analysis_results.get("step_response", {}),
+                        analysis_results.get("fft_noise", {}),
+                        analysis_results.get("pid_error", {}),
+                        analysis_results.get("motor_analysis", {}),
+                    )
+                    tune_score_result = sanitize_for_json(tune_score_result)
+                    analyses.append(
+                        LogAnalysis(
+                            log_id=log_id,
+                            module="tune_score",
+                            result_json=tune_score_result,
+                        )
+                    )
+                    if isinstance(tune_score_result, dict):
+                        tune_score_value = tune_score_result.get("overall_score", 0)
+                    else:
+                        logger.warning(
+                            "Analysis module 'tune_score' returned unexpected type %s for log %s",
+                            type(tune_score_result).__name__,
+                            log_id,
+                        )
+                except Exception as module_error:
+                    logger.warning(
+                        "Analysis module 'tune_score' failed for log %s: %s",
+                        log_id,
+                        module_error,
+                    )
             
             # Delete any existing analyses for this log
             session.query(LogAnalysis).filter(LogAnalysis.log_id == log_id).delete()
@@ -351,8 +394,8 @@ def run_all_analyses(self, log_id: int):
             return {
                 "log_id": log_id,
                 "status": "success",
-                "tune_score": tune_score_result.get("overall_score", 0) if isinstance(tune_score_result, dict) else 0,
-                "modules_analyzed": len(analysis_results),
+                "tune_score": tune_score_value,
+                "modules_analyzed": len(analyses),
             }
             
         except Exception as e:
