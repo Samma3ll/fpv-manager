@@ -119,6 +119,12 @@ async def update_module(
         )
 
     update_data = update.model_dump(exclude_unset=True)
+    # Filter out None values for non-nullable fields to avoid IntegrityError
+    if "config_json" in update_data and update_data["config_json"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="config_json cannot be null",
+        )
     for field, value in update_data.items():
         setattr(module, field, value)
 

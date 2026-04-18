@@ -79,16 +79,24 @@ export function LogDetailPage() {
       setLoading(true)
     }
     try {
-      const [logResponse, analysesResponse, modulesResponse] = await Promise.all([
+      // Fetch log and analyses together
+      const [logResponse, analysesResponse] = await Promise.all([
         client.getLog(logId),
         client.getAnalyses(logId),
-        client.listModules(true),
       ])
 
       setLog(logResponse)
       setAnalyses(analysesResponse)
-      setModules(modulesResponse.items)
       setError(null)
+
+      // Fetch modules separately with error handling to prevent blocking page render
+      try {
+        const modulesResponse = await client.listModules(true)
+        setModules(modulesResponse.items)
+      } catch (modulesError) {
+        console.error('Failed to load modules:', modulesError)
+        setModules([])
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load log.')
     } finally {
@@ -121,6 +129,13 @@ export function LogDetailPage() {
   const availableTabs = useMemo(() => {
     return moduleTabs.filter((tab) => analyses[tab.key] || tab.key === 'step_response' || tab.key === 'fft_noise')
   }, [analyses, moduleTabs])
+
+  // Synchronize activeTab when availableTabs changes
+  useEffect(() => {
+    if (availableTabs.length > 0 && !availableTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(availableTabs[0].key)
+    }
+  }, [availableTabs, activeTab])
 
   if (!Number.isFinite(logId)) {
     return <section className="section-card"><p className="inline-error">Invalid log id.</p></section>
@@ -305,6 +320,20 @@ export function LogDetailPage() {
     )
   }
 
+  function renderGenericPlugin() {
+    const currentAnalysis = analyses[activeTab]
+    if (!currentAnalysis?.result) {
+      return <EmptyState title="Analysis unavailable" body={`The ${activeTab} analysis is not ready yet.`} />
+    }
+    return (
+      <div className="section-card">
+        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {JSON.stringify(currentAnalysis.result, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+
   return (
     <section className="page-grid">
       <section className="section-card">
@@ -370,6 +399,13 @@ export function LogDetailPage() {
         {activeTab === 'pid_error' ? renderPidError() : null}
         {activeTab === 'motor_analysis' ? renderMotors() : null}
         {activeTab === 'tune_score' ? renderTuneScore() : null}
+        {activeTab !== 'step_response' &&
+         activeTab !== 'fft_noise' &&
+         activeTab !== 'pid_error' &&
+         activeTab !== 'motor_analysis' &&
+         activeTab !== 'tune_score'
+          ? renderGenericPlugin()
+          : null}
       </section>
     </section>
   )

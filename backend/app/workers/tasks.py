@@ -302,17 +302,33 @@ def run_all_analyses(self, log_id: int):
             # Calculate tune score if enabled and we have the required inputs
             tune_score_result = {}
             if "tune_score" in enabled_names:
-                try:
-                    from app.analysis.tune_score import score_tune_quality
-                    tune_score_result = score_tune_quality(
-                        analysis_results.get("step_response", {}),
-                        analysis_results.get("fft_noise", {}),
-                        analysis_results.get("pid_error", {}),
-                        analysis_results.get("motor_analysis", {}),
-                    )
-                except Exception as ts_err:
-                    logger.error(f"Tune score failed: {ts_err}", exc_info=True)
-                    tune_score_result = {"error": str(ts_err)[:255]}
+                # Validate that all prerequisite modules are present and valid
+                prerequisites = ["step_response", "fft_noise", "pid_error", "motor_analysis"]
+                missing = []
+                for prereq in prerequisites:
+                    prereq_result = analysis_results.get(prereq)
+                    # Check if result is missing, empty dict, or contains an error
+                    if not prereq_result or (isinstance(prereq_result, dict) and ("error" in prereq_result or not prereq_result)):
+                        missing.append(prereq)
+
+                if missing:
+                    logger.warning(f"Skipping tune score: missing or errored prerequisites {missing}")
+                    tune_score_result = {
+                        "skipped": "missing prerequisites",
+                        "missing": missing,
+                    }
+                else:
+                    try:
+                        from app.analysis.tune_score import score_tune_quality
+                        tune_score_result = score_tune_quality(
+                            analysis_results.get("step_response", {}),
+                            analysis_results.get("fft_noise", {}),
+                            analysis_results.get("pid_error", {}),
+                            analysis_results.get("motor_analysis", {}),
+                        )
+                    except Exception as ts_err:
+                        logger.error(f"Tune score failed: {ts_err}", exc_info=True)
+                        tune_score_result = {"error": str(ts_err)[:255]}
                 analysis_results["tune_score"] = tune_score_result
 
             # Sanitize and store all results
