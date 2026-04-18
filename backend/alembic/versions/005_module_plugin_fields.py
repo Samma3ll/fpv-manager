@@ -17,7 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """Add plugin architecture columns and seed future module stubs."""
+    """
+    Add nullable plugin-related columns to the `modules` table, backfill values for existing modules, and insert disabled placeholder rows for future modules.
+    
+    Adds `analysis_task` and `frontend_route` (both VARCHAR(255), nullable) to the `modules` table. Backfills those fields for existing modules:
+    - step_response -> analysis_task='analyze_log_step_response', frontend_route='step_response'
+    - fft_noise -> analysis_task='analyze_log_fft', frontend_route='fft_noise'
+    - pid_error -> analysis_task='analyze_log_pid_error', frontend_route='pid_error'
+    - motor_analysis -> analysis_task='analyze_log_motor', frontend_route='motor_analysis'
+    - tune_score -> analysis_task=NULL, frontend_route='tune_score'
+    
+    Inserts disabled placeholder modules if they do not already exist: `video`, `betaflight_backup`, and `gps_track` (each with `enabled=false`, `analysis_task=NULL`, `config_json='{}'`, and `created_at` set to the current time).
+    """
     # Add new columns
     op.add_column("modules", sa.Column("analysis_task", sa.String(length=255), nullable=True))
     op.add_column("modules", sa.Column("frontend_route", sa.String(length=255), nullable=True))
@@ -56,7 +67,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove plugin architecture columns and future module stubs."""
+    """
+    Remove seeded future module rows and drop plugin-related columns from the modules table.
+    
+    Deletes rows from `modules` with names 'video', 'betaflight_backup', and 'gps_track', then drops the `frontend_route` and `analysis_task` columns.
+    """
     op.execute(
         "DELETE FROM modules WHERE name IN ('video', 'betaflight_backup', 'gps_track')"
     )

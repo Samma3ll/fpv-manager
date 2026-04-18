@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react'
 import { client } from '../lib/api'
 import type { Module } from '../types'
 
+/**
+ * Renders the Settings page that lists installed modules and plugins and lets the user enable or disable them.
+ *
+ * Displays a loading state while fetching modules, shows an inline error message when loading or toggle actions fail, and groups modules into "Analysis modules" and "Plugins" sections with per-module enable/disable toggle buttons.
+ *
+ * @returns The page UI containing module and plugin lists with toggle controls, a loading placeholder when modules are being fetched, and an inline error display when present.
+ */
 export function SettingsPage() {
   const [modules, setModules] = useState<Module[]>([])
   const [loading, setLoading] = useState(true)

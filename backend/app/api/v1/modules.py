@@ -23,7 +23,16 @@ async def list_modules(
     module_type: str | None = None,
     enabled_only: bool = False,
 ) -> ModuleListResponse:
-    """List all registered modules, optionally filtered by type or enabled status."""
+    """
+    Return registered modules, optionally filtered by module type or enabled state.
+    
+    Parameters:
+        module_type (str | None): If provided, only modules with this `module_type` are included.
+        enabled_only (bool): If True, include only modules whose `enabled` attribute is True.
+    
+    Returns:
+        ModuleListResponse: Response containing `items` (list of validated ModuleResponse objects ordered by id) and `total` (integer count of matching modules).
+    """
     query = select(Module)
     if module_type:
         query = query.where(Module.module_type == module_type)
@@ -52,7 +61,15 @@ async def get_module(
     module_id: int,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ModuleResponse:
-    """Get a specific module by its ID."""
+    """
+    Retrieve a module record by its ID.
+    
+    Raises:
+        HTTPException: If no module exists with the given ID (404).
+    
+    Returns:
+        ModuleResponse: The requested module serialized as a ModuleResponse.
+    """
     query = select(Module).where(Module.id == module_id)
     result = await session.execute(query)
     module = result.scalar_one_or_none()
@@ -76,7 +93,21 @@ async def update_module(
     update: ModuleUpdate,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ModuleResponse:
-    """Update a module's enabled state or configuration."""
+    """
+    Update fields of an existing module, persist the changes, and return the updated representation.
+    
+    Applies the values present in `update` to the module with the given `module_id`, commits the transaction, and returns the refreshed module as a `ModuleResponse`.
+    
+    Parameters:
+        module_id (int): ID of the module to update.
+        update (ModuleUpdate): Partial update payload containing fields to change.
+    
+    Returns:
+        ModuleResponse: The updated module representation.
+    
+    Raises:
+        HTTPException: 404 if a module with `module_id` does not exist.
+    """
     query = select(Module).where(Module.id == module_id)
     result = await session.execute(query)
     module = result.scalar_one_or_none()

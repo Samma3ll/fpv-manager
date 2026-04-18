@@ -37,13 +37,11 @@ function axisNames(result: Record<string, unknown>) {
 }
 
 /**
- * Page component that displays a log's metadata and available analysis results.
+ * Displays a log's metadata and available analysis results in an overview and tabbed analysis panels.
  *
- * Loads the log and its analyses using the `logId` route parameter, exposes UI for
- * selecting analysis tabs (step response, FFT noise, PID error, motor analysis, tune score),
- * and polls the server every 5 seconds while the log status is `pending` or `processing`.
+ * Polls the server while the log status is `pending` or `processing`.
  *
- * @returns The rendered React element for the log detail page containing the overview card and analysis tabs.
+ * @returns The React element for the log detail page.
  */
 export function LogDetailPage() {
   const params = useParams()
@@ -66,6 +64,12 @@ export function LogDetailPage() {
     return dynamicTabs.length > 0 ? dynamicTabs : FALLBACK_TABS
   }, [modules])
 
+  /**
+   * Loads log metadata, associated analyses, and available modules into component state.
+   *
+   * @param initial - When true, toggles the component loading indicator while the request runs
+   * @returns Nothing; results are applied to component state (`log`, `analyses`, `modules`, and `error`)
+   */
   async function load(initial = true) {
     if (!Number.isFinite(logId)) {
       return
