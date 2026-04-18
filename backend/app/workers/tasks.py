@@ -349,6 +349,12 @@ def run_all_analyses(self, log_id: int):
                     )
                     if isinstance(tune_score_result, dict):
                         tune_score_value = tune_score_result.get("overall_score", 0)
+                    else:
+                        logger.warning(
+                            "Analysis module 'tune_score' returned unexpected type %s for log %s",
+                            type(tune_score_result).__name__,
+                            log_id,
+                        )
                 except Exception as module_error:
                     logger.warning(
                         "Analysis module 'tune_score' failed for log %s: %s",
