@@ -254,6 +254,7 @@ def run_all_analyses(self, log_id: int):
         "fft_noise": ("app.analysis.fft_noise", "analyze_fft_noise"),
         "pid_error": ("app.analysis.pid_error", "analyze_pid_error"),
         "motor_analysis": ("app.analysis.motor_analysis", "analyze_motor_output"),
+        "gyro_spectrogram": ("app.analysis.gyro_spectrogram", "analyze_gyro_spectrogram"),
     }
 
     session_factory = get_sync_session_factory()
@@ -283,19 +284,19 @@ def run_all_analyses(self, log_id: int):
                 object_name=log_entry.file_path,
             )
             
-            # Load parser
-            from app.analysis.utils import load_parser_from_file_content
-            parser = load_parser_from_file_content(file_content)
+            # Load parser — use context manager to keep temp file alive
+            # during lazy frame iteration across all analysis modules
+            from app.analysis.utils import ParserContextManager
+            from orangebox import Parser as OrangeboxParser
+            parser_ctx = ParserContextManager(file_content)
+            parser_ctx.__enter__()
             
-            # Load enabled analysis modules
-            from app.models import Module
-            enabled_modules_result = session.execute(
-                select(Module.name).where(
-                    Module.enabled.is_(True),
-                    Module.module_type == "analysis",
-                )
-            )
-            enabled_module_names = set(enabled_modules_result.scalars().all())
+            # Helper to create a fresh parser for each module
+            # (parser.frames() is a generator exhausted after one iteration)
+            def fresh_parser():
+                return OrangeboxParser.load(parser_ctx.temp_path)
+            
+            enabled_module_names = enabled_names
 
             logger.info(
                 "Running enabled analyses for log %s: %s",
@@ -307,13 +308,15 @@ def run_all_analyses(self, log_id: int):
             from app.analysis.fft_noise import analyze_fft_noise
             from app.analysis.pid_error import analyze_pid_error
             from app.analysis.motor_analysis import analyze_motor_output
+            from app.analysis.gyro_spectrogram import analyze_gyro_spectrogram
             from app.analysis.tune_score import score_tune_quality
             
             analysis_registry = {
-                "step_response": lambda: analyze_step_response(parser),
-                "fft_noise": lambda: analyze_fft_noise(parser),
-                "pid_error": lambda: analyze_pid_error(parser),
-                "motor_analysis": lambda: analyze_motor_output(parser),
+                "step_response": lambda: analyze_step_response(fresh_parser()),
+                "fft_noise": lambda: analyze_fft_noise(fresh_parser()),
+                "pid_error": lambda: analyze_pid_error(fresh_parser()),
+                "motor_analysis": lambda: analyze_motor_output(fresh_parser()),
+                "gyro_spectrogram": lambda: analyze_gyro_spectrogram(fresh_parser()),
             }
 
             # Store successful results for prerequisite reuse
@@ -421,6 +424,13 @@ def run_all_analyses(self, log_id: int):
 
             # Retry with exponential backoff
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+        finally:
+            # Clean up parser temp file
+            try:
+                parser_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
 
 
 @shared_task(bind=True, name="analyze_log_step_response")

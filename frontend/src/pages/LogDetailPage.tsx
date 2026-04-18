@@ -11,6 +11,7 @@ import type { AnalysesResponse, AxisMetrics, BlackboxLog, Module } from '../type
 const FALLBACK_TABS = [
   { key: 'step_response', label: 'Step Response' },
   { key: 'fft_noise', label: 'FFT Noise' },
+  { key: 'gyro_spectrogram', label: 'Gyro Spectrogram' },
   { key: 'pid_error', label: 'PID Error' },
   { key: 'motor_analysis', label: 'Motors' },
   { key: 'tune_score', label: 'Summary Score' },
@@ -52,6 +53,8 @@ export function LogDetailPage() {
   const [modules, setModules] = useState<Module[]>([])
   const [activeTab, setActiveTab] = useState('step_response')
   const [fftAxis, setFftAxis] = useState<'roll' | 'pitch' | 'yaw'>('roll')
+  const [spectroAxis, setSpectroAxis] = useState<'roll' | 'pitch' | 'yaw'>('roll')
+  const [spectroFilter, setSpectroFilter] = useState<'unfiltered' | 'filtered'>('unfiltered')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -243,6 +246,154 @@ export function LogDetailPage() {
     )
   }
 
+  function renderGyroSpectrogram() {
+    const result = analyses.gyro_spectrogram?.result as Record<string, unknown> | undefined
+    if (!result || typeof result !== 'object') {
+      return <EmptyState title="Gyro spectrogram unavailable" body="This log has not produced spectrogram data yet." />
+    }
+
+    const hasUnfiltered = result.has_unfiltered as boolean
+    const hasFiltered = result.has_filtered as boolean
+    const axisData = result[spectroAxis] as Record<string, unknown> | undefined
+    if (!axisData || 'error' in axisData) {
+      return <EmptyState title="Spectrogram unavailable" body={`No spectrogram data for ${spectroAxis} axis.`} />
+    }
+
+    const modeData = axisData[spectroFilter] as Record<string, unknown> | undefined
+    if (!modeData || 'error' in modeData) {
+      // Fall back to the other mode if this one is missing
+      const alt = spectroFilter === 'unfiltered' ? 'filtered' : 'unfiltered'
+      const altData = axisData[alt] as Record<string, unknown> | undefined
+      if (!altData || 'error' in altData) {
+        return <EmptyState title="Spectrogram unavailable" body={`No ${spectroFilter} data available.`} />
+      }
+      return <EmptyState title="Spectrogram unavailable" body={`No ${spectroFilter} data available. Try switching to ${alt}.`} />
+    }
+
+    const spec = modeData.spectrogram as Record<string, unknown>
+    const fft = modeData.fft as Record<string, unknown>
+
+    const freqs = spec.freqs as number[]
+    const throttlePct = (spec.throttle_pct ?? spec.time_pct) as number[]
+    // Linear magnitude normalized 0-100 (like BBX Explorer)
+    const powerNorm = (spec.power_norm ?? spec.power_db) as number[][]
+    const zMin = (spec.zmin as number) ?? 0
+    const zMax = (spec.zmax as number) ?? 100
+
+    const fftFreqs = fft.freqs as number[]
+    const fftPsd = fft.psd as number[]
+
+    // Available filter modes for toggle
+    const filterModes: ('unfiltered' | 'filtered')[] = []
+    if (hasUnfiltered) filterModes.push('unfiltered')
+    if (hasFiltered) filterModes.push('filtered')
+
+    const gyroFieldLabel = spectroFilter === 'unfiltered' ? 'Unfiltered Gyro' : 'Gyro'
+
+    return (
+      <div className="stack-gap">
+        {/* Controls row */}
+        <div className="axis-toggle" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 0 }}>
+            {(['roll', 'pitch', 'yaw'] as const).map((axis) => (
+              <button
+                className={spectroAxis === axis ? 'axis-button active' : 'axis-button'}
+                key={axis}
+                type="button"
+                onClick={() => setSpectroAxis(axis)}
+              >
+                {axis.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 0 }}>
+            {filterModes.map((mode) => (
+              <button
+                className={spectroFilter === mode ? 'axis-button active' : 'axis-button'}
+                key={mode}
+                type="button"
+                onClick={() => setSpectroFilter(mode)}
+              >
+                {mode === 'unfiltered' ? 'Unfiltered' : 'Filtered'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* FFT Frequency Spectrum (like Blackbox Explorer green "flame chart") */}
+        <PlotlyChart
+          className="chart-surface"
+          data={[
+            {
+              x: fftFreqs,
+              y: fftPsd,
+              type: 'scatter',
+              mode: 'lines',
+              fill: 'tozeroy',
+              fillcolor: 'rgba(76, 175, 80, 0.5)',
+              line: { color: '#4caf50', width: 1 },
+              name: `${gyroFieldLabel} [${spectroAxis}]`,
+            },
+          ]}
+          layout={{
+            title: `${gyroFieldLabel} [${spectroAxis}] — Frequency Spectrum`,
+            xaxis: { title: 'Frequency (Hz)', range: [0, 500], gridcolor: '#333' },
+            yaxis: { title: 'Power Spectral Density', type: 'log', gridcolor: '#333' },
+            height: 350,
+            showlegend: false,
+            plot_bgcolor: '#1a1a1a',
+            paper_bgcolor: 'transparent',
+          }}
+        />
+
+        {/* Spectrogram Heatmap (BBX Explorer HSL(360,100%,L%) colorscale) */}
+        <PlotlyChart
+          className="chart-surface"
+          data={[
+            {
+              z: powerNorm,
+              x: freqs,
+              y: throttlePct,
+              type: 'heatmap',
+              colorscale: [
+                [0, 'hsl(0,100%,0%)'],
+                [0.1, 'hsl(0,100%,10%)'],
+                [0.2, 'hsl(0,100%,20%)'],
+                [0.3, 'hsl(0,100%,30%)'],
+                [0.4, 'hsl(0,100%,40%)'],
+                [0.5, 'hsl(0,100%,50%)'],
+                [0.6, 'hsl(0,100%,60%)'],
+                [0.7, 'hsl(0,100%,70%)'],
+                [0.8, 'hsl(0,100%,80%)'],
+                [0.9, 'hsl(0,100%,90%)'],
+                [1.0, 'hsl(0,100%,100%)'],
+              ],
+              zmin: zMin,
+              zmax: zMax,
+              zsmooth: 'best',
+              colorbar: { title: '%' },
+              hoverongaps: false,
+            },
+          ]}
+          layout={{
+            title: `${gyroFieldLabel} [${spectroAxis}] — Frequency vs Throttle`,
+            xaxis: { title: 'Frequency (Hz)', range: [0, 500], gridcolor: '#333' },
+            yaxis: { title: 'Throttle (%)', range: [0, 100], gridcolor: '#333' },
+            height: 500,
+            plot_bgcolor: '#1a1a1a',
+            paper_bgcolor: 'transparent',
+          }}
+        />
+
+        {/* Stats */}
+        <div className="mini-stats">
+          <StatCard label="Sample rate" value={`${formatNumber(result.sample_rate_hz as number, 0)} Hz`} />
+          <StatCard label="Duration" value={`${formatNumber(result.duration_s as number, 1)} s`} />
+        </div>
+      </div>
+    )
+  }
+
   function renderPidError() {
     const result = analyses.pid_error?.result
     if (!result || typeof result !== 'object') {
@@ -396,11 +547,13 @@ export function LogDetailPage() {
 
         {activeTab === 'step_response' ? renderStepResponse() : null}
         {activeTab === 'fft_noise' ? renderFftNoise() : null}
+        {activeTab === 'gyro_spectrogram' ? renderGyroSpectrogram() : null}
         {activeTab === 'pid_error' ? renderPidError() : null}
         {activeTab === 'motor_analysis' ? renderMotors() : null}
         {activeTab === 'tune_score' ? renderTuneScore() : null}
         {activeTab !== 'step_response' &&
          activeTab !== 'fft_noise' &&
+         activeTab !== 'gyro_spectrogram' &&
          activeTab !== 'pid_error' &&
          activeTab !== 'motor_analysis' &&
          activeTab !== 'tune_score'

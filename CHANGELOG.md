@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Phase 8 - Analysis & Scoring Enhancements (in progress)
+- **Gyro Spectrogram Analysis**: Time-frequency spectrogram for gyroscope data
+  - `scipy.signal.spectrogram()` with Hann windowing and PSD scaling
+  - Per-axis (roll/pitch/yaw) spectrogram computation
+  - Frequency range limited to 0–500 Hz for relevance
+  - Downsampled to ~200 time bins × ~128 freq bins for efficient storage
+  - Power output in dB scale with summary stats (min/max/mean)
+- **Filtered/Unfiltered Toggle**: Dual-mode gyro analysis
+  - Unfiltered: raw gyroADC data spectrogram
+  - Filtered: 2nd-order Butterworth low-pass at 250 Hz applied via `sosfiltfilt`
+  - Frontend toggle to switch between modes on all charts
+- **Spectrogram Flame Chart**: Heatmap visualization with 'Hot' colorscale
+  - Time (x) vs Frequency (y) vs Power dB (color) per axis
+  - Interactive axis and filter mode selectors
+- **3-Axis Overview Heatmap**: All axes average power over time
+  - Viridis colorscale heatmap with roll/pitch/yaw rows
+  - Quick visual comparison of noise across axes
+- **Module Registration**: `gyro_spectrogram` module in database
+  - Migration: `006_add_gyro_spectrogram.py`
+  - Enabled by default, auto-runs with `run_all_analyses`
+
 ### Phase 5 - Log Parsing Worker ✅
 - **Step Response Analysis**: Measures roll/pitch/yaw response characteristics
   - Rise time: Time to reach 90% of steady state
