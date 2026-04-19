@@ -270,13 +270,20 @@ export function LogDetailPage() {
       return <EmptyState title="Spectrogram unavailable" body={`No ${spectroFilter} data available. Try switching to ${alt}.`} />
     }
 
-    const spec = modeData.spectrogram as Record<string, unknown>
-    const fft = modeData.fft as Record<string, unknown>
+    const spec = modeData.spectrogram as Record<string, unknown> | undefined
+    const fft = modeData.fft as Record<string, unknown> | undefined
+
+    if (!spec || !fft) {
+      return <EmptyState title="Spectrogram unavailable" body="Analysis data is incomplete (missing spectrogram or FFT)." />
+    }
 
     const freqs = spec.freqs as number[]
     const throttlePct = (spec.throttle_pct ?? spec.time_pct) as number[]
     // Linear magnitude normalized 0-100 (like BBX Explorer)
-    const powerNorm = (spec.power_norm ?? spec.power_db) as number[][]
+    if (!spec.power_norm) {
+      return <EmptyState title="Spectrogram unavailable" body="Normalized power data is missing from this analysis. Try re-uploading the log." />
+    }
+    const powerNorm = spec.power_norm as number[][]
     const zMin = (spec.zmin as number) ?? 0
     const zMax = (spec.zmax as number) ?? 100
 

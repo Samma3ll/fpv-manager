@@ -288,6 +288,7 @@ def run_all_analyses(self, log_id: int):
             # during lazy frame iteration across all analysis modules
             from app.analysis.utils import ParserContextManager
             from orangebox import Parser as OrangeboxParser
+            parser_ctx = None
             parser_ctx = ParserContextManager(file_content)
             parser_ctx.__enter__()
             
@@ -427,10 +428,11 @@ def run_all_analyses(self, log_id: int):
 
         finally:
             # Clean up parser temp file
-            try:
-                parser_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
+            if parser_ctx is not None:
+                try:
+                    parser_ctx.__exit__(None, None, None)
+                except Exception:
+                    pass
 
 
 @shared_task(bind=True, name="analyze_log_step_response")
