@@ -4,7 +4,7 @@ import logging
 import numpy as np
 from typing import Dict, Any, Optional, List
 
-from .utils import extract_field_data, calculate_stats, calculate_rms, find_peaks
+from .utils import extract_fields, calculate_stats, calculate_rms, find_peaks
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,23 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
         logger.warning("No motor fields found")
         return {"error": "No motor data found"}
     
+    requested_fields = [field for _, field in motor_fields]
+    if "time" in parser.field_names:
+        requested_fields.append("time")
+    if "rcCommand[3]" in parser.field_names:
+        requested_fields.append("rcCommand[3]")
+    for i in range(4):
+        f = f"eRPM[{i}]"
+        if f in parser.field_names:
+            requested_fields.append(f)
+
+    fields = extract_fields(parser, requested_fields)
+
     # Analyze each motor
     motor_data_list = []
     
     for motor_idx, motor_field in motor_fields:
-        motor_data = extract_field_data(parser, motor_field)
+        motor_data = fields.get(motor_field)
         
         if motor_data is None:
             logger.warning(f"Could not extract {motor_field}")
@@ -65,7 +77,7 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
     # Analyze overall characteristics
     if len(motor_data_list) >= 2:
         try:
-            overall = _analyze_overall_motors(motor_data_list, parser)
+            overall = _analyze_overall_motors(motor_data_list, parser, fields)
             result["overall"] = overall
         except Exception as e:
             logger.error(f"Error analyzing overall motors: {e}")
@@ -147,7 +159,7 @@ def _analyze_motor(motor_data: np.ndarray, motor_idx: int) -> Dict[str, Any]:
     return result
 
 
-def _analyze_overall_motors(motor_data_list: List[tuple], parser) -> Dict[str, Any]:
+def _analyze_overall_motors(motor_data_list: List[tuple], parser, fields: Dict[str, np.ndarray]) -> Dict[str, Any]:
     """
     Compute cross-motor balance and synchronization metrics from multiple motor time series.
 
@@ -213,13 +225,31 @@ def _analyze_overall_motors(motor_data_list: List[tuple], parser) -> Dict[str, A
     
     # Resonance in motor outputs
     # Check if there are common frequency peaks across motors
-    resonance_peaks = _find_motor_resonances(motor_data_list, parser)
+    time_data = fields.get("time")
+    time_array = time_data / 1_000_000.0 if time_data is not None else None
+    resonance_peaks = _find_motor_resonances(motor_data_list, time_array)
     result["potential_resonance_peaks"] = resonance_peaks
+
+    throttle = fields.get("rcCommand[3]")
+    if throttle is not None and len(throttle) > 10:
+        thr_min_len = min(global_min_len, len(throttle))
+        avg_motor = np.mean(np.vstack([data[:thr_min_len] for _, data in motor_data_list]), axis=0)
+        thr = throttle[:thr_min_len]
+
+        if np.std(avg_motor) > 0 and np.std(thr) > 0:
+            result["throttle_correlation"] = float(np.corrcoef(avg_motor, thr)[0, 1])
+
+    erpm_fields = [fields.get(f"eRPM[{i}]") for i in range(4) if fields.get(f"eRPM[{i}]") is not None]
+    if erpm_fields:
+        erpm_min_len = min(len(x) for x in erpm_fields)
+        erpm_stack = np.vstack([x[:erpm_min_len] for x in erpm_fields])
+        result["erpm_mean"] = float(np.mean(erpm_stack))
+        result["erpm_std"] = float(np.std(erpm_stack))
 
     return result
 
 
-def _find_motor_resonances(motor_data_list: List[tuple], parser) -> List[float]:
+def _find_motor_resonances(motor_data_list: List[tuple], time_array: Optional[np.ndarray]) -> List[float]:
     """
     Identify frequency peaks that appear across multiple motors' output spectra.
 
@@ -232,15 +262,12 @@ def _find_motor_resonances(motor_data_list: List[tuple], parser) -> List[float]:
     """
     try:
         from scipy import signal as scipy_signal
-        from .utils import get_time_array
-
         resonances = []
 
         if len(motor_data_list) < 2:
             return resonances
 
-        # Derive sampling frequency from time array
-        time_array = get_time_array(parser)
+        # Derive sampling frequency from extracted time array
         if time_array is None or len(time_array) < 2:
             logger.warning("Cannot compute sampling frequency: no valid time data")
             return resonances

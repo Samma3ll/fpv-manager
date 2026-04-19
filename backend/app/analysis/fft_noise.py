@@ -5,7 +5,7 @@ import numpy as np
 from typing import Dict, Any, Optional
 from scipy import signal as scipy_signal
 
-from .utils import extract_field_data, get_time_array, calculate_stats
+from .utils import extract_fields, calculate_stats
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,26 @@ def analyze_fft_noise(parser) -> Dict[str, Any]:
     """
     result = {}
     
-    time_array = get_time_array(parser)
+    field_names = ["time", "gyroADC[0]", "gyroADC[1]", "gyroADC[2]"]
+    fields = extract_fields(parser, field_names)
+    time_data = fields.get("time")
+    time_array = time_data / 1_000_000.0 if time_data is not None else None
     if time_array is None or len(time_array) < 2:
         logger.warning("Cannot analyze FFT: no valid time data")
         return {"error": "No valid time data"}
     
-    # Calculate sampling frequency
-    dt = np.mean(np.diff(time_array))
+    dt_arr = np.diff(time_array)
+    dt_arr = dt_arr[dt_arr > 0]
+    if dt_arr.size == 0:
+        logger.warning("Cannot analyze FFT: invalid time deltas")
+        return {"error": "Invalid time deltas"}
+
+    # Use median timestep and remove large time-gap regions.
+    dt = float(np.median(dt_arr))
+    gap_indices = np.where(np.diff(time_array) > dt * 3.0)[0] + 1
+    segments = np.split(np.arange(len(time_array)), gap_indices)
+    best_segment = max(segments, key=len)
+
     fs = 1.0 / dt if dt > 0 else 0
     
     if fs <= 0:
@@ -49,12 +62,14 @@ def analyze_fft_noise(parser) -> Dict[str, Any]:
     
     for axis_name, axis_idx in axes:
         gyro_field = f"gyroADC[{axis_idx}]"
-        gyro_data = extract_field_data(parser, gyro_field)
+        gyro_data = fields.get(gyro_field)
         
         if gyro_data is None:
             logger.warning(f"No gyro data for {axis_name} axis")
             result[axis_name] = {"error": f"No {axis_name} gyro data"}
             continue
+
+        gyro_data = gyro_data[best_segment]
         
         try:
             axis_result = _analyze_axis_fft(gyro_data, fs, axis=axis_name)
@@ -91,24 +106,26 @@ def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -
     if n < 2:
         return {"error": "Insufficient data"}
     
-    # Remove DC component and apply window
     gyro_mean_removed = gyro_data - np.mean(gyro_data)
-    window = scipy_signal.windows.hann(n)
-    gyro_windowed = gyro_mean_removed * window
+
+    # Welch PSD is closer to the Blackbox analyser output than a single FFT.
+    nperseg = int(min(4096, max(256, n // 4)))
+    freqs, psd = scipy_signal.welch(
+        gyro_mean_removed,
+        fs=fs,
+        nperseg=nperseg,
+        noverlap=nperseg // 2,
+        window="hann",
+        scaling="density",
+    )
     
-    # Compute FFT
-    fft_result = np.fft.rfft(gyro_windowed)
-    freqs = np.fft.rfftfreq(n, 1.0 / fs)
-    
-    # Power spectral density (magnitude squared)
-    psd = np.abs(fft_result) ** 2 / (fs * n)
-    
-    # Find peaks in PSD (resonances)
-    # Use high threshold to find only significant peaks
-    threshold_pct = 10  # Top 10% peaks
-    threshold = np.percentile(psd, 100 - threshold_pct)
-    
-    peak_indices = np.where(psd > threshold)[0]
+    analysis_mask = freqs > 5
+    if np.any(analysis_mask):
+        threshold = np.percentile(psd[analysis_mask], 95)
+        peak_indices = np.where((psd >= threshold) & analysis_mask)[0]
+    else:
+        threshold = np.percentile(psd, 95)
+        peak_indices = np.where(psd >= threshold)[0]
     peaks = []
     
     for idx in peak_indices:
@@ -123,14 +140,23 @@ def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -
     # Sort by power
     peaks = sorted(peaks, key=lambda x: x["power"], reverse=True)[:10]  # Top 10 peaks
     
-    # Calculate statistics
     # Identify dominant frequency (peak with highest power)
     dominant_freq = 0.0
     if len(peaks) > 0:
         dominant_freq = peaks[0]["frequency_hz"]
-    
-    # Calculate noise floor (median of lower frequencies)
-    low_freq_mask = freqs < 50
+
+    # Match BB viewer behavior: ignore low frequencies when looking for max noise.
+    high_freq_mask = freqs >= 100
+    if not np.any(high_freq_mask):
+        high_freq_mask = freqs >= 3
+    max_noise_frequency_hz = 0.0
+    if np.any(high_freq_mask):
+        local_idx = int(np.argmax(psd[high_freq_mask]))
+        high_freqs = freqs[high_freq_mask]
+        max_noise_frequency_hz = float(high_freqs[local_idx])
+
+    # Noise floor based on lower frequencies.
+    low_freq_mask = (freqs >= 3) & (freqs < 50)
     noise_floor = float(np.median(psd[low_freq_mask])) if np.any(low_freq_mask) else 0.0
     
     # Calculate total energy in different frequency bands
@@ -141,11 +167,22 @@ def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -
         "250_500_hz": _get_band_energy(freqs, psd, 250, 500),
     }
     
+    # Evenly downsample for storage; avoid keeping only the lowest frequencies.
+    target = min(len(freqs), 1000)
+    if len(freqs) > target:
+        ds_idx = np.linspace(0, len(freqs) - 1, target, dtype=int)
+        freqs_out = freqs[ds_idx]
+        psd_out = psd[ds_idx]
+    else:
+        freqs_out = freqs
+        psd_out = psd
+
     return {
-        "freqs": freqs.tolist()[:len(freqs)//10],  # Downsample for storage
-        "psd": psd.tolist()[:len(psd)//10],
+        "freqs": freqs_out.tolist(),
+        "psd": psd_out.tolist(),
         "peaks": peaks,
         "dominant_frequency_hz": dominant_freq,
+        "max_noise_frequency_hz": max_noise_frequency_hz,
         "noise_floor": noise_floor,
         "energy_bands": bands,
         "gyro_stats": calculate_stats(gyro_data),

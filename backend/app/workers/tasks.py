@@ -326,7 +326,7 @@ def run_all_analyses(self, log_id: int):
             # Store all results in database
             from app.models import LogAnalysis
 
-            analyses = []
+            persisted_results = {}
             for module_name, analyzer in analysis_registry.items():
                 if module_name not in enabled_module_names:
                     continue
@@ -334,13 +334,7 @@ def run_all_analyses(self, log_id: int):
                 try:
                     module_result = sanitize_for_json(analyzer())
                     analysis_results[module_name] = module_result
-                    analyses.append(
-                        LogAnalysis(
-                            log_id=log_id,
-                            module=module_name,
-                            result_json=module_result,
-                        )
-                    )
+                    persisted_results[module_name] = module_result
                 except Exception as module_error:
                     logger.warning(
                         "Analysis module '%s' failed for log %s: %s",
@@ -359,13 +353,7 @@ def run_all_analyses(self, log_id: int):
                         analysis_results.get("motor_analysis", {}),
                     )
                     tune_score_result = sanitize_for_json(tune_score_result)
-                    analyses.append(
-                        LogAnalysis(
-                            log_id=log_id,
-                            module="tune_score",
-                            result_json=tune_score_result,
-                        )
-                    )
+                    persisted_results["tune_score"] = tune_score_result
                     if isinstance(tune_score_result, dict):
                         tune_score_value = tune_score_result.get("overall_score", 0)
                     else:
@@ -384,7 +372,7 @@ def run_all_analyses(self, log_id: int):
             # Delete any existing analyses for this log
             session.query(LogAnalysis).filter(LogAnalysis.log_id == log_id).delete()
             
-            for module_name, raw_result in analysis_results.items():
+            for module_name, raw_result in persisted_results.items():
                 sanitized = sanitize_for_json(raw_result)
                 session.add(LogAnalysis(
                     log_id=log_id,
@@ -393,13 +381,13 @@ def run_all_analyses(self, log_id: int):
                 ))
 
             session.commit()
-            logger.info(f"Stored {len(analysis_results)} analyses for log {log_id}")
+            logger.info(f"Stored {len(persisted_results)} analyses for log {log_id}")
             
             return {
                 "log_id": log_id,
                 "status": "success",
                 "tune_score": tune_score_value,
-                "modules_analyzed": len(analyses),
+                "modules_analyzed": len(persisted_results),
             }
             
         except Exception as e:
