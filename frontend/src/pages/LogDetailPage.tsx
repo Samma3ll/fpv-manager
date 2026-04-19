@@ -179,6 +179,13 @@ export function LogDetailPage() {
     )
   }
 
+  /**
+   * Render the "FFT noise" analysis tab including an axis selector, PSD plot, summary stats, and peak list.
+   *
+   * Renders an EmptyState when FFT data for the selected axis is not available.
+   *
+   * @returns The JSX element for the FFT noise view or an `EmptyState` component when data is unavailable.
+   */
   function renderFftNoise() {
     if (!fftResult || typeof activeFft !== 'object' || activeFft == null) {
       return <EmptyState title="FFT noise unavailable" body="This log has not produced FFT data yet." />
@@ -246,6 +253,14 @@ export function LogDetailPage() {
     )
   }
 
+  /**
+   * Render the gyro spectrogram tab UI including axis/filter controls, FFT spectrum, spectrogram heatmap, and sample stats.
+   *
+   * Displays an informative EmptyState when the gyro spectrogram analysis or required subfields are missing or errored,
+   * and suggests switching filter modes when an alternate mode is available.
+   *
+   * @returns A JSX element containing the spectrogram controls, two Plotly charts (frequency spectrum and heatmap), and sample-rate/duration stats, or an EmptyState component when data is unavailable.
+   */
   function renderGyroSpectrogram() {
     const result = analyses.gyro_spectrogram?.result as Record<string, unknown> | undefined
     if (!result || typeof result !== 'object') {
@@ -401,6 +416,13 @@ export function LogDetailPage() {
     )
   }
 
+  /**
+   * Render the PID error analysis section with per-axis RMS, Max, and MAE statistics.
+   *
+   * If PID error results are missing or invalid, renders an EmptyState indicating metrics are unavailable.
+   *
+   * @returns A React element containing a three-column grid of per-axis PID error stat cards, or an EmptyState when PID error data is not present.
+   */
   function renderPidError() {
     const result = analyses.pid_error?.result
     if (!result || typeof result !== 'object') {

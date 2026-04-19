@@ -295,6 +295,12 @@ def run_all_analyses(self, log_id: int):
             # Helper to create a fresh parser for each module
             # (parser.frames() is a generator exhausted after one iteration)
             def fresh_parser():
+                """
+                Create a new OrangeboxParser loaded from the parser context's temporary file.
+                
+                Returns:
+                    OrangeboxParser: A parser instance initialized from `parser_ctx.temp_path`.
+                """
                 return OrangeboxParser.load(parser_ctx.temp_path)
             
             enabled_module_names = enabled_names

@@ -18,15 +18,17 @@ logger = logging.getLogger(__name__)
 
 def analyze_step_response(parser) -> Dict[str, Any]:
     """
-    Compute step-response metrics for roll, pitch, and yaw from the parser's time-series data.
+    Analyze step-response metrics for roll, pitch, and yaw from time-series data in the provided parser.
     
-    Validates the common time axis and sample interval, then for each axis extracts `gyroADC[index]` and `rcCommand[index]` to produce a per-axis analysis. Each axis entry contains averaged step metrics (e.g., `rise_time_ms`, `overshoot_pct`, `settling_time_ms`, `ringing`) and overall gyro statistics, or an `error`/`warning` entry when analysis cannot be performed.
+    Builds a requested field list (always includes `time` and `gyroADC[i]` for i=0..2; for commands it prefers `setpoint[i]` when present and falls back to `rcCommand[i]`), extracts those fields, converts `time` from microseconds to seconds, and validates the time axis and mean sample interval. For each axis returns either averaged step-response metrics (for analyzed steps) plus `gyro_stats` and a `command_field` indicating which command source was used, or an `error`/`warning` payload when analysis cannot be performed.
     
     Parameters:
-        parser: orangebox Parser instance supplying time, `gyroADC[...]`, and `rcCommand[...]` fields.
+        parser: Parser-like object exposing `field_names` and usable by `extract_fields` to obtain `time`, `gyroADC[...]`, and `setpoint[...]`/`rcCommand[...]` arrays.
     
     Returns:
-        result (Dict[str, Any]): Mapping of axis names ("roll", "pitch", "yaw") to their analysis dictionaries or error/warning payloads.
+        Dict[str, Any]: A mapping with keys "roll", "pitch", and "yaw" whose values are either:
+          - analysis dictionaries containing averaged metrics such as `rise_time_ms`, `rise_time_median_ms`, `overshoot_pct`, `settling_time_ms`, `ringing`, `steps_analyzed`, `steps_detected`, `command_activity_pct`, `gyro_stats`, and `command_field`; or
+          - error/warning payloads (e.g., `{"error": "..."} or {"warning": "...", ...}`) describing why analysis was not produced.
     """
     result = {}
     

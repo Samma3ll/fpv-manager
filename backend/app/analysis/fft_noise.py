@@ -12,21 +12,22 @@ logger = logging.getLogger(__name__)
 
 def analyze_fft_noise(parser) -> Dict[str, Any]:
     """
-    Analyze gyroscope time-series data with FFT to extract per-axis frequency spectra, resonance peaks, dominant frequency, noise floor, band energies, and basic statistics.
+    Analyze gyroscope time-series and produce per-axis frequency analysis including PSD, resonance peaks, dominant frequency, noise floor, band energies, and basic statistics.
     
     Parameters:
-        parser: Parser-like object providing time and gyro fields (accessed via get_time_array and extract_field_data).
+        parser: Object providing a time array (in microseconds) and per-axis gyro sample arrays named "gyroADC[0]", "gyroADC[1]", and "gyroADC[2]".
     
     Returns:
         dict: Mapping each axis name ("roll", "pitch", "yaw") to either an analysis dict or an error dict.
             On success each axis dict contains:
-                - "freqs": downsampled frequency bins (numpy array or list of floats)
-                - "psd": downsampled power spectral density values (numpy array or list of floats)
-                - "peaks": list of up to 10 peak dicts with keys "frequency_hz", "power", "power_db"
-                - "dominant_frequency_hz": float
-                - "noise_floor": float
-                - "energy_bands": dict of band energies (e.g., "5-50", "50-100", "100-250", "250-500")
-                - "gyro_stats": statistics produced by calculate_stats(gyro_data)
+                - freqs: downsampled frequency bins (list of floats)
+                - psd: downsampled power spectral density values (list of floats)
+                - peaks: list of up to 10 peak dicts with keys "frequency_hz", "power", "power_db"
+                - dominant_frequency_hz: float
+                - max_noise_frequency_hz: float (frequency of maximum PSD in the high-frequency region)
+                - noise_floor: float (median PSD in the 3–50 Hz range when available)
+                - energy_bands: dict of band energies keyed by band name (e.g., "5_50_hz", "50_100_hz", "100_250_hz", "250_500_hz")
+                - gyro_stats: summary statistics produced from the raw gyro samples
             If global prerequisites fail, returns {"error": "<message>"}. If an axis cannot be analyzed, that axis maps to {"error": "<message>"}.
     """
     result = {}
@@ -83,24 +84,26 @@ def analyze_fft_noise(parser) -> Dict[str, Any]:
 
 def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -> Dict[str, Any]:
     """
-    Analyze a single gyroscope axis using FFT to extract PSD, resonance peaks, dominant frequency, noise floor, and band energies.
+    Compute the power spectral density and related noise/peak metrics for a single gyroscope axis.
     
     Parameters:
         gyro_data (np.ndarray): Time-series gyroscope samples for the axis.
         fs (float): Sampling frequency in Hz.
-        axis (str): Human-readable axis name used for context (e.g., "roll", "pitch", "yaw").
+        axis (str): Human-readable axis name for context (e.g., "roll", "pitch", "yaw").
     
     Returns:
-        result (Dict[str, Any]): Analysis results. On success the dictionary contains:
-            - "freqs": list[float] — downsampled frequency bins (Hz).
-            - "psd": list[float] — downsampled power spectral density values.
-            - "peaks": list[dict] — up to 10 resonance peak objects with
-                "frequency_hz", "power", and "power_db".
-            - "dominant_frequency_hz": float — frequency of the highest-power peak or 0.0 if none.
-            - "noise_floor": float — median PSD below 50 Hz (or 0.0 if no bins).
-            - "energy_bands": dict — summed PSD energy for predefined bands.
-            - "gyro_stats": dict — summary statistics for the input gyro_data.
-        If input is insufficient, returns {"error": "Insufficient data"}.
+        dict: Analysis results or an error dictionary.
+            On success, the dictionary contains:
+                - "freqs": list[float] — downsampled frequency bin centers in Hz.
+                - "psd": list[float] — downsampled power spectral density values.
+                - "peaks": list[dict] — up to 10 peak objects with keys:
+                    "frequency_hz" (float), "power" (float), "power_db" (float).
+                - "dominant_frequency_hz": float — frequency of the highest-power peak or 0.0.
+                - "max_noise_frequency_hz": float — frequency of maximum PSD in the high-frequency band or 0.0.
+                - "noise_floor": float — median PSD in 3–50 Hz or 0.0 if unavailable.
+                - "energy_bands": dict — summed PSD energy for predefined bands ("5_50_hz", "50_100_hz", "100_250_hz", "250_500_hz").
+                - "gyro_stats": dict — summary statistics for the input gyro_data.
+            If input length is insufficient, returns {"error": "Insufficient data"}.
     """
     n = len(gyro_data)
     if n < 2:

@@ -16,21 +16,38 @@ MAX_MATRIX_CELLS = 600_000
 
 
 def _next_power_of_2(n: int) -> int:
-    """Return the smallest power of 2 >= n."""
+    """
+    Compute the smallest power of two greater than or equal to n.
+    
+    Returns:
+        value (int): The smallest power of two greater than or equal to `n`. Returns 1 when `n <= 1`.
+    """
     return 1 << max(0, (n - 1).bit_length())
 
 
 def analyze_gyro_spectrogram(parser) -> Dict[str, Any]:
     """
-    Compute spectrograms for each gyro axis (roll, pitch, yaw) using the
-    actual filtered (gyroADC) and unfiltered (gyroUnfilt) fields from the log.
-
+    Compute per-axis gyro frequency-vs-throttle spectrograms and Welch FFT spectra from a flight log.
+    
+    Detects available filtered (`gyroADC`) and/or unfiltered (`gyroUnfilt`) gyro fields, optionally reads `rcCommand[3]` as throttle, selects the longest contiguous time segment (ignoring large time gaps), validates sampling rate and minimum sample length, normalizes throttle to 0–100% when present, and produces for each axis a frequency-vs-throttle heatmap and a PSD summary.
+    
     Parameters:
-        parser: orangebox Parser instance.
-
+        parser: orangebox Parser instance providing log field data.
+    
     Returns:
-        dict keyed by axis name, each containing 'unfiltered' and 'filtered'
-        spectrogram data, plus an FFT spectrum for each.
+        A dictionary containing:
+          - sample_rate_hz (float): estimated sample rate in Hz.
+          - duration_s (float): duration of the selected continuous segment in seconds.
+          - has_unfiltered (bool): whether unfiltered gyro fields were present.
+          - has_filtered (bool): whether filtered gyro fields were present.
+          - has_throttle (bool): whether throttle data was available and used.
+          - roll, pitch, yaw: per-axis dictionaries. Each axis entry maps labels
+            "unfiltered" and/or "filtered" to either:
+              - {"spectrogram": {...}, "fft": {...}}: computed results, or
+              - {"error": "<message>"}: description of why results are not available.
+    
+        The spectrogram entry contains frequency bins, throttle bins and a normalized
+        power matrix; the fft entry contains frequency bins and PSD values.
     """
     # Check which gyro fields are available
     has_unfilt = "gyroUnfilt[0]" in parser.field_names
@@ -123,7 +140,25 @@ def _compute_axis(
     fs: float,
     throttle_data: Optional[np.ndarray],
 ) -> Dict[str, Any]:
-    """Compute freq-vs-throttle heatmap + FFT for a single axis, for both data sources."""
+    """
+    Compute frequency-vs-throttle heatmap and FFT spectrum for a single gyro axis for both filtered and unfiltered sources.
+    
+    For each of the "unfiltered" and "filtered" inputs, if the provided data array is at least 256 samples long this function produces:
+    - a spectrogram-like frequency-vs-throttle heatmap under the "spectrogram" key, and
+    - a power spectral density summary under the "fft" key.
+    If a source is missing or contains fewer than 256 samples, the corresponding entry contains an "error" key with a short message.
+    
+    Parameters:
+        unfilt_data (Optional[np.ndarray]): Unfiltered gyro samples for the axis, or None if unavailable.
+        filt_data (Optional[np.ndarray]): Filtered (ADC) gyro samples for the axis, or None if unavailable.
+        fs (float): Estimated sample rate in Hz.
+        throttle_data (Optional[np.ndarray]): Per-sample throttle percentage (0–100) aligned with gyro samples, or None to use pseudo-throttle.
+    
+    Returns:
+        Dict[str, Any]: Mapping with keys "unfiltered" and "filtered". Each value is either:
+          - {"spectrogram": <dict>, "fft": <dict>} on success, or
+          - {"error": "<message>"} when data is missing or too short.
+    """
     axis_result: Dict[str, Any] = {}
 
     for label, gyro_data in [("unfiltered", unfilt_data), ("filtered", filt_data)]:
@@ -146,7 +181,14 @@ def _compute_axis(
 
 
 def _fft_spectrum(gyro_data: np.ndarray, fs: float) -> Dict[str, Any]:
-    """Compute PSD via Welch's method (matches Blackbox Explorer noise plot)."""
+    """
+    Compute a power spectral density (PSD) of gyro data using Welch's method, then limit frequencies to MAX_FREQ_HZ and downsample for storage.
+    
+    Returns:
+        result (dict): Dictionary with keys:
+            - `freqs` (List[float]): Frequency bin centers in Hz (capped at MAX_FREQ_HZ).
+            - `psd` (List[float]): Corresponding power spectral density values.
+    """
     n = len(gyro_data)
     nperseg = min(4096, n // 2)
 
@@ -182,11 +224,23 @@ def _freq_vs_throttle(
     fs: float,
     throttle_data: Optional[np.ndarray],
 ) -> Dict[str, Any]:
-    """Compute frequency-vs-throttle heatmap matching BBX Explorer algorithm.
-
-    Divides data into ~300ms FFT chunks with a sliding window (1/6 step),
-    computes magnitude FFT per chunk, bins results into 100 throttle bins,
-    and averages. Returns linear magnitude normalized to 0-100.
+    """
+    Generate a frequency-vs-throttle heatmap of gyro magnitudes binned into 100 throttle percentage bins.
+    
+    The function divides the gyro time series into short, overlapping FFT chunks (≈300 ms), computes one-sided FFT magnitudes per chunk, assigns each chunk to a throttle bin (using the provided throttle_data or a time-based fallback), averages magnitudes per bin, clips frequency content to MAX_FREQ_HZ, and scales magnitudes into the 0–100 range.
+    
+    Parameters:
+        gyro_data (np.ndarray): 1-D gyro time-series samples.
+        fs (float): Sample rate in Hz.
+        throttle_data (Optional[np.ndarray]): Per-sample throttle percentage (0–100). If None, a pseudo-throttle based on time position is used.
+    
+    Returns:
+        Dict[str, Any]: A mapping with keys:
+            - "freqs": list of frequency bin centers in Hz.
+            - "throttle_pct": list of throttle bin indices (0–99).
+            - "power_norm": 2D list [throttle_bin][freq_bin] of magnitudes normalized to 0–100.
+            - "zmin": 0
+            - "zmax": 100
     """
     NUM_THROTTLE_BINS = 100
     CHUNK_TIME_MS = 300

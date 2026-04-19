@@ -156,7 +156,21 @@ def _analyze_axis_error(error: np.ndarray, axis: str = "unknown") -> Dict[str, A
 
 
 def _error_vs_setpoint(error: np.ndarray, setpoint: np.ndarray) -> Dict[str, Any]:
-    """Aggregate absolute tracking error by setpoint magnitude bins."""
+    """
+    Produce bin-wise aggregation of absolute tracking error grouped by absolute setpoint magnitude.
+    
+    Parameters:
+        error (np.ndarray): 1-D array of tracking errors aligned with `setpoint`.
+        setpoint (np.ndarray): 1-D array of commanded rates; absolute values define bin membership.
+    
+    Returns:
+        Dict[str, Any]: A dictionary with key `"bins"` containing a list of bin records. Each record has:
+            - `setpoint_min` (float): lower bound of the bin (inclusive).
+            - `setpoint_max` (float): upper bound of the bin (inclusive for the final bin, exclusive otherwise).
+            - `mean_abs_error` (float): mean of absolute errors for samples in the bin.
+            - `sample_count` (int): number of samples in the bin.
+        Returns `{"bins": []}` when inputs are empty or when the maximum absolute setpoint is non-positive.
+    """
     if len(error) == 0 or len(setpoint) == 0:
         return {"bins": []}
 
