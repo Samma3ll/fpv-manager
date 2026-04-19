@@ -316,6 +316,7 @@ def run_all_analyses(self, log_id: int):
             from app.analysis.pid_error import analyze_pid_error
             from app.analysis.motor_analysis import analyze_motor_output
             from app.analysis.gyro_spectrogram import analyze_gyro_spectrogram
+            from app.analysis.flight_summary import analyze_flight_summary
             from app.analysis.tune_score import score_tune_quality
             
             analysis_registry = {
@@ -324,6 +325,7 @@ def run_all_analyses(self, log_id: int):
                 "pid_error": lambda: analyze_pid_error(fresh_parser()),
                 "motor_analysis": lambda: analyze_motor_output(fresh_parser()),
                 "gyro_spectrogram": lambda: analyze_gyro_spectrogram(fresh_parser()),
+                "flight_summary": lambda: analyze_flight_summary(fresh_parser()),
             }
 
             # Store successful results for prerequisite reuse
@@ -711,6 +713,81 @@ def analyze_log_motor(self, log_id: int):
             return {
                 "log_id": log_id,
                 "module": "motor_analysis",
+                "status": "error",
+                "error": str(e),
+            }
+
+
+@shared_task(bind=True, name="analyze_log_flight_summary")
+def analyze_log_flight_summary(self, log_id: int):
+    """
+    Run flight summary analysis for a blackbox log and persist the result.
+
+    Downloads the log file, constructs a parser, executes the flight summary analysis (battery, current, throttle, GPS),
+    and stores the analysis JSON in the `LogAnalysis` table with module name `"flight_summary"`.
+
+    Parameters:
+        log_id (int): Primary key of the BlackboxLog entry to analyze.
+
+    Returns:
+        dict: On success: `{"log_id": log_id, "module": "flight_summary", "status": "success"}`.
+              If the log entry is not found: `{"log_id": log_id, "status": "error"}`.
+              On analysis or storage failure: `{"log_id": log_id, "module": "flight_summary", "status": "error", "error": <error message>}`.
+    """
+    logger.info(f"Analyzing flight summary for log {log_id}")
+
+    session_factory = get_sync_session_factory()
+    with session_factory() as session:
+        result = session.execute(
+            select(BlackboxLog).where(BlackboxLog.id == log_id)
+        )
+        log_entry = result.scalar_one_or_none()
+
+        if not log_entry:
+            logger.error(f"Log entry {log_id} not found")
+            return {"log_id": log_id, "status": "error"}
+
+        try:
+            file_content = minio_client.download_file(
+                bucket=minio_client.bucket_blackbox,
+                object_name=log_entry.file_path,
+            )
+
+            from app.analysis.utils import load_parser_from_file_content
+            from app.analysis.flight_summary import analyze_flight_summary
+            from app.models import LogAnalysis
+            from sqlalchemy import delete
+
+            parser = load_parser_from_file_content(file_content)
+            analysis_result = analyze_flight_summary(parser)
+
+            # Delete existing analysis for this module
+            session.execute(
+                delete(LogAnalysis).where(
+                    LogAnalysis.log_id == log_id,
+                    LogAnalysis.module == "flight_summary"
+                )
+            )
+
+            # Store result
+            analysis = LogAnalysis(
+                log_id=log_id,
+                module="flight_summary",
+                result_json=analysis_result,
+            )
+            session.add(analysis)
+            session.commit()
+
+            return {
+                "log_id": log_id,
+                "module": "flight_summary",
+                "status": "success",
+            }
+        except Exception as e:
+            logger.error(f"Error analyzing flight summary for log {log_id}: {e}")
+            return {
+                "log_id": log_id,
+                "module": "flight_summary",
                 "status": "error",
                 "error": str(e),
             }

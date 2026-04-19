@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { EmptyState } from '../components/EmptyState'
+import { FlightSummaryCard } from '../components/FlightSummaryCard'
 import { PlotlyChart } from '../components/PlotlyChart'
 import { StatusBadge } from '../components/StatusBadge'
 import { StatCard } from '../components/StatCard'
@@ -9,6 +10,7 @@ import { formatDate, formatDuration, formatNumber } from '../lib/format'
 import type { AnalysesResponse, AxisMetrics, BlackboxLog, Module } from '../types'
 
 const FALLBACK_TABS = [
+  { key: 'flight_summary', label: 'Flight Summary' },
   { key: 'step_response', label: 'Step Response' },
   { key: 'fft_noise', label: 'FFT Noise' },
   { key: 'gyro_spectrogram', label: 'Gyro Spectrogram' },
@@ -51,7 +53,7 @@ export function LogDetailPage() {
   const [log, setLog] = useState<BlackboxLog | null>(null)
   const [analyses, setAnalyses] = useState<AnalysesResponse>({})
   const [modules, setModules] = useState<Module[]>([])
-  const [activeTab, setActiveTab] = useState('step_response')
+  const [activeTab, setActiveTab] = useState('flight_summary')
   const [fftAxis, setFftAxis] = useState<'roll' | 'pitch' | 'yaw'>('roll')
   const [spectroAxis, setSpectroAxis] = useState<'roll' | 'pitch' | 'yaw'>('roll')
   const [spectroFilter, setSpectroFilter] = useState<'unfiltered' | 'filtered'>('unfiltered')
@@ -130,7 +132,7 @@ export function LogDetailPage() {
   const activeFft = fftResult?.[fftAxis]
 
   const availableTabs = useMemo(() => {
-    return moduleTabs.filter((tab) => analyses[tab.key] || tab.key === 'step_response' || tab.key === 'fft_noise')
+    return moduleTabs.filter((tab) => analyses[tab.key] || tab.key === 'flight_summary' || tab.key === 'step_response' || tab.key === 'fft_noise')
   }, [analyses, moduleTabs])
 
   // Synchronize activeTab when availableTabs changes
@@ -500,6 +502,15 @@ export function LogDetailPage() {
     )
   }
 
+  function renderFlightSummary() {
+    const result = analyses.flight_summary?.result
+    if (!result || typeof result !== 'object') {
+      return <EmptyState title="Flight summary unavailable" body="This log has not produced operational insights yet." />
+    }
+
+    return <FlightSummaryCard data={result as any} />
+  }
+
   function renderGenericPlugin() {
     const currentAnalysis = analyses[activeTab]
     if (!currentAnalysis?.result) {
@@ -574,13 +585,15 @@ export function LogDetailPage() {
           ))}
         </div>
 
+        {activeTab === 'flight_summary' ? renderFlightSummary() : null}
         {activeTab === 'step_response' ? renderStepResponse() : null}
         {activeTab === 'fft_noise' ? renderFftNoise() : null}
         {activeTab === 'gyro_spectrogram' ? renderGyroSpectrogram() : null}
         {activeTab === 'pid_error' ? renderPidError() : null}
         {activeTab === 'motor_analysis' ? renderMotors() : null}
         {activeTab === 'tune_score' ? renderTuneScore() : null}
-        {activeTab !== 'step_response' &&
+        {activeTab !== 'flight_summary' &&
+         activeTab !== 'step_response' &&
          activeTab !== 'fft_noise' &&
          activeTab !== 'gyro_spectrogram' &&
          activeTab !== 'pid_error' &&
