@@ -6,9 +6,8 @@ from typing import Dict, Any, Optional, List
 from scipy import signal as scipy_signal
 
 from .utils import (
-    extract_field_data, 
-    get_time_array, 
-    find_peaks, 
+    extract_fields,
+    find_peaks,
     normalize_signal,
     calculate_derivative,
     calculate_stats,
@@ -19,19 +18,31 @@ logger = logging.getLogger(__name__)
 
 def analyze_step_response(parser) -> Dict[str, Any]:
     """
-    Compute step-response metrics for roll, pitch, and yaw from the parser's time-series data.
+    Analyze step-response metrics for roll, pitch, and yaw from time-series data in the provided parser.
     
-    Validates the common time axis and sample interval, then for each axis extracts `gyroADC[index]` and `rcCommand[index]` to produce a per-axis analysis. Each axis entry contains averaged step metrics (e.g., `rise_time_ms`, `overshoot_pct`, `settling_time_ms`, `ringing`) and overall gyro statistics, or an `error`/`warning` entry when analysis cannot be performed.
+    Builds a requested field list (always includes `time` and `gyroADC[i]` for i=0..2; for commands it prefers `setpoint[i]` when present and falls back to `rcCommand[i]`), extracts those fields, converts `time` from microseconds to seconds, and validates the time axis and mean sample interval. For each axis returns either averaged step-response metrics (for analyzed steps) plus `gyro_stats` and a `command_field` indicating which command source was used, or an `error`/`warning` payload when analysis cannot be performed.
     
     Parameters:
-        parser: orangebox Parser instance supplying time, `gyroADC[...]`, and `rcCommand[...]` fields.
+        parser: Parser-like object exposing `field_names` and usable by `extract_fields` to obtain `time`, `gyroADC[...]`, and `setpoint[...]`/`rcCommand[...]` arrays.
     
     Returns:
-        result (Dict[str, Any]): Mapping of axis names ("roll", "pitch", "yaw") to their analysis dictionaries or error/warning payloads.
+        Dict[str, Any]: A mapping with keys "roll", "pitch", and "yaw" whose values are either:
+          - analysis dictionaries containing averaged metrics such as `rise_time_ms`, `rise_time_median_ms`, `overshoot_pct`, `settling_time_ms`, `ringing`, `steps_analyzed`, `steps_detected`, `command_activity_pct`, `gyro_stats`, and `command_field`; or
+          - error/warning payloads (e.g., `{"error": "..."} or {"warning": "...", ...}`) describing why analysis was not produced.
     """
     result = {}
     
-    time_array = get_time_array(parser)
+    requested_fields = ["time"]
+    for axis_idx in range(3):
+        requested_fields.append(f"gyroADC[{axis_idx}]")
+        if f"setpoint[{axis_idx}]" in parser.field_names:
+            requested_fields.append(f"setpoint[{axis_idx}]")
+        elif f"rcCommand[{axis_idx}]" in parser.field_names:
+            requested_fields.append(f"rcCommand[{axis_idx}]")
+
+    fields = extract_fields(parser, requested_fields)
+    time_data = fields.get("time")
+    time_array = time_data / 1_000_000.0 if time_data is not None else None
     if time_array is None or len(time_array) < 2:
         logger.warning("Cannot analyze step response: no valid time data")
         return {"error": "No valid time data"}
@@ -46,10 +57,13 @@ def analyze_step_response(parser) -> Dict[str, Any]:
     
     for axis_name, axis_idx in axes:
         gyro_field = f"gyroADC[{axis_idx}]"
-        rate_field = f"rcCommand[{axis_idx}]"
-        
-        gyro_data = extract_field_data(parser, gyro_field)
-        rate_cmd = extract_field_data(parser, rate_field)
+        if f"setpoint[{axis_idx}]" in fields:
+            rate_field = f"setpoint[{axis_idx}]"
+        else:
+            rate_field = f"rcCommand[{axis_idx}]"
+
+        gyro_data = fields.get(gyro_field)
+        rate_cmd = fields.get(rate_field)
         
         if gyro_data is None or rate_cmd is None:
             logger.warning(f"Missing data for {axis_name} axis: gyro={gyro_data is not None}, rate_cmd={rate_cmd is not None}")
@@ -64,6 +78,7 @@ def analyze_step_response(parser) -> Dict[str, Any]:
                 dt,
                 axis=axis_name
             )
+            axis_result["command_field"] = rate_field
             result[axis_name] = axis_result
         except Exception as e:
             logger.error(f"Error analyzing {axis_name} step response: {e}")
@@ -103,16 +118,35 @@ def _analyze_axis_response(
           - Or, when step inputs are not detected at all:
               - A dict containing a `warning` string indicating no step inputs detected.
     """
-    # Find step input regions (where rate_cmd changes significantly)
+    min_len = min(len(gyro_data), len(rate_cmd))
+    if min_len < 10:
+        return {"warning": "Insufficient axis samples", "sample_count": int(min_len)}
+
+    gyro_data = gyro_data[:min_len]
+    rate_cmd = rate_cmd[:min_len]
+
+    # Find step input regions (where command changes significantly)
     rate_cmd_derivative = calculate_derivative(rate_cmd, dt)
-    rate_threshold = 0.3 * np.max(np.abs(rate_cmd_derivative))
+    abs_deriv = np.abs(rate_cmd_derivative)
+    if abs_deriv.size == 0:
+        return {"warning": "No command derivative data", "gyro_stats": calculate_stats(gyro_data)}
+
+    rate_threshold = float(np.percentile(abs_deriv, 98))
+    if rate_threshold <= 0:
+        rate_threshold = float(np.max(abs_deriv))
+    if rate_threshold <= 0:
+        return {"warning": "No command activity", "gyro_stats": calculate_stats(gyro_data)}
     
     # Find indices where rate command changes
     step_indices = np.where(np.abs(rate_cmd_derivative) > rate_threshold)[0]
     
     if len(step_indices) == 0:
         logger.warning(f"{axis}: No step inputs detected")
-        return {"warning": "No step inputs detected"}
+        return {
+            "warning": "No step inputs detected",
+            "command_activity_pct": 0.0,
+            "gyro_stats": calculate_stats(gyro_data),
+        }
     
     # Analyze multiple steps
     steps_analysis = []
@@ -144,15 +178,23 @@ def _analyze_axis_response(
     
     if not steps_analysis:
         # Return overall statistics if no clear steps found
-        return {"warning": "No clear step responses", **calculate_stats(gyro_data)}
+        return {
+            "warning": "No clear step responses",
+            "steps_detected": int(len(step_indices)),
+            "command_activity_pct": float(len(step_indices) / len(rate_cmd) * 100.0),
+            **calculate_stats(gyro_data),
+        }
     
     # Average results across all detected steps
     result = {
         "rise_time_ms": float(np.mean([s.get("rise_time_ms", 0) for s in steps_analysis])),
+        "rise_time_median_ms": float(np.median([s.get("rise_time_ms", 0) for s in steps_analysis])),
         "overshoot_pct": float(np.mean([s.get("overshoot_pct", 0) for s in steps_analysis])),
         "settling_time_ms": float(np.mean([s.get("settling_time_ms", 0) for s in steps_analysis])),
         "ringing": float(np.mean([s.get("ringing", 0) for s in steps_analysis])),
         "steps_analyzed": len(steps_analysis),
+        "steps_detected": int(len(step_indices)),
+        "command_activity_pct": float(len(step_indices) / len(rate_cmd) * 100.0),
         "gyro_stats": calculate_stats(gyro_data),
     }
     

@@ -8,13 +8,14 @@ from app.workers.tasks import run_all_analyses
 
 def _build_session(log_entry, enabled_modules):
     session = MagicMock()
+    enabled_module_rows = [SimpleNamespace(name=name) for name in enabled_modules]
 
     log_result = MagicMock()
     log_result.scalar_one_or_none.return_value = log_entry
 
     enabled_modules_result = MagicMock()
     enabled_modules_scalars = MagicMock()
-    enabled_modules_scalars.all.return_value = enabled_modules
+    enabled_modules_scalars.all.return_value = enabled_module_rows
     enabled_modules_result.scalars.return_value = enabled_modules_scalars
 
     session.execute = MagicMock(side_effect=[log_result, enabled_modules_result])

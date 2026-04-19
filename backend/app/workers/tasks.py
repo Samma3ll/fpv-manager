@@ -254,6 +254,7 @@ def run_all_analyses(self, log_id: int):
         "fft_noise": ("app.analysis.fft_noise", "analyze_fft_noise"),
         "pid_error": ("app.analysis.pid_error", "analyze_pid_error"),
         "motor_analysis": ("app.analysis.motor_analysis", "analyze_motor_output"),
+        "gyro_spectrogram": ("app.analysis.gyro_spectrogram", "analyze_gyro_spectrogram"),
     }
 
     session_factory = get_sync_session_factory()
@@ -283,19 +284,26 @@ def run_all_analyses(self, log_id: int):
                 object_name=log_entry.file_path,
             )
             
-            # Load parser
-            from app.analysis.utils import load_parser_from_file_content
-            parser = load_parser_from_file_content(file_content)
+            # Load parser — use context manager to keep temp file alive
+            # during lazy frame iteration across all analysis modules
+            from app.analysis.utils import ParserContextManager
+            from orangebox import Parser as OrangeboxParser
+            parser_ctx = None
+            parser_ctx = ParserContextManager(file_content)
+            parser_ctx.__enter__()
             
-            # Load enabled analysis modules
-            from app.models import Module
-            enabled_modules_result = session.execute(
-                select(Module.name).where(
-                    Module.enabled.is_(True),
-                    Module.module_type == "analysis",
-                )
-            )
-            enabled_module_names = set(enabled_modules_result.scalars().all())
+            # Helper to create a fresh parser for each module
+            # (parser.frames() is a generator exhausted after one iteration)
+            def fresh_parser():
+                """
+                Create a new OrangeboxParser loaded from the parser context's temporary file.
+                
+                Returns:
+                    OrangeboxParser: A parser instance initialized from `parser_ctx.temp_path`.
+                """
+                return OrangeboxParser.load(parser_ctx.temp_path)
+            
+            enabled_module_names = enabled_names
 
             logger.info(
                 "Running enabled analyses for log %s: %s",
@@ -307,13 +315,17 @@ def run_all_analyses(self, log_id: int):
             from app.analysis.fft_noise import analyze_fft_noise
             from app.analysis.pid_error import analyze_pid_error
             from app.analysis.motor_analysis import analyze_motor_output
+            from app.analysis.gyro_spectrogram import analyze_gyro_spectrogram
+            from app.analysis.flight_summary import analyze_flight_summary
             from app.analysis.tune_score import score_tune_quality
             
             analysis_registry = {
-                "step_response": lambda: analyze_step_response(parser),
-                "fft_noise": lambda: analyze_fft_noise(parser),
-                "pid_error": lambda: analyze_pid_error(parser),
-                "motor_analysis": lambda: analyze_motor_output(parser),
+                "step_response": lambda: analyze_step_response(fresh_parser()),
+                "fft_noise": lambda: analyze_fft_noise(fresh_parser()),
+                "pid_error": lambda: analyze_pid_error(fresh_parser()),
+                "motor_analysis": lambda: analyze_motor_output(fresh_parser()),
+                "gyro_spectrogram": lambda: analyze_gyro_spectrogram(fresh_parser()),
+                "flight_summary": lambda: analyze_flight_summary(fresh_parser()),
             }
 
             # Store successful results for prerequisite reuse
@@ -322,7 +334,7 @@ def run_all_analyses(self, log_id: int):
             # Store all results in database
             from app.models import LogAnalysis
 
-            analyses = []
+            persisted_results = {}
             for module_name, analyzer in analysis_registry.items():
                 if module_name not in enabled_module_names:
                     continue
@@ -330,13 +342,7 @@ def run_all_analyses(self, log_id: int):
                 try:
                     module_result = sanitize_for_json(analyzer())
                     analysis_results[module_name] = module_result
-                    analyses.append(
-                        LogAnalysis(
-                            log_id=log_id,
-                            module=module_name,
-                            result_json=module_result,
-                        )
-                    )
+                    persisted_results[module_name] = module_result
                 except Exception as module_error:
                     logger.warning(
                         "Analysis module '%s' failed for log %s: %s",
@@ -355,13 +361,7 @@ def run_all_analyses(self, log_id: int):
                         analysis_results.get("motor_analysis", {}),
                     )
                     tune_score_result = sanitize_for_json(tune_score_result)
-                    analyses.append(
-                        LogAnalysis(
-                            log_id=log_id,
-                            module="tune_score",
-                            result_json=tune_score_result,
-                        )
-                    )
+                    persisted_results["tune_score"] = tune_score_result
                     if isinstance(tune_score_result, dict):
                         tune_score_value = tune_score_result.get("overall_score", 0)
                     else:
@@ -380,7 +380,7 @@ def run_all_analyses(self, log_id: int):
             # Delete any existing analyses for this log
             session.query(LogAnalysis).filter(LogAnalysis.log_id == log_id).delete()
             
-            for module_name, raw_result in analysis_results.items():
+            for module_name, raw_result in persisted_results.items():
                 sanitized = sanitize_for_json(raw_result)
                 session.add(LogAnalysis(
                     log_id=log_id,
@@ -389,13 +389,13 @@ def run_all_analyses(self, log_id: int):
                 ))
 
             session.commit()
-            logger.info(f"Stored {len(analysis_results)} analyses for log {log_id}")
+            logger.info(f"Stored {len(persisted_results)} analyses for log {log_id}")
             
             return {
                 "log_id": log_id,
                 "status": "success",
                 "tune_score": tune_score_value,
-                "modules_analyzed": len(analyses),
+                "modules_analyzed": len(persisted_results),
             }
             
         except Exception as e:
@@ -421,6 +421,14 @@ def run_all_analyses(self, log_id: int):
 
             # Retry with exponential backoff
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+        finally:
+            # Clean up parser temp file
+            if parser_ctx is not None:
+                try:
+                    parser_ctx.__exit__(None, None, None)
+                except Exception as e:
+                    logger.exception("Failed to clean up parser temp file")
 
 
 @shared_task(bind=True, name="analyze_log_step_response")
@@ -705,6 +713,81 @@ def analyze_log_motor(self, log_id: int):
             return {
                 "log_id": log_id,
                 "module": "motor_analysis",
+                "status": "error",
+                "error": str(e),
+            }
+
+
+@shared_task(bind=True, name="analyze_log_flight_summary")
+def analyze_log_flight_summary(self, log_id: int):
+    """
+    Run flight summary analysis for a blackbox log and persist the result.
+
+    Downloads the log file, constructs a parser, executes the flight summary analysis (battery, current, throttle, GPS),
+    and stores the analysis JSON in the `LogAnalysis` table with module name `"flight_summary"`.
+
+    Parameters:
+        log_id (int): Primary key of the BlackboxLog entry to analyze.
+
+    Returns:
+        dict: On success: `{"log_id": log_id, "module": "flight_summary", "status": "success"}`.
+              If the log entry is not found: `{"log_id": log_id, "status": "error"}`.
+              On analysis or storage failure: `{"log_id": log_id, "module": "flight_summary", "status": "error", "error": <error message>}`.
+    """
+    logger.info(f"Analyzing flight summary for log {log_id}")
+
+    session_factory = get_sync_session_factory()
+    with session_factory() as session:
+        result = session.execute(
+            select(BlackboxLog).where(BlackboxLog.id == log_id)
+        )
+        log_entry = result.scalar_one_or_none()
+
+        if not log_entry:
+            logger.error(f"Log entry {log_id} not found")
+            return {"log_id": log_id, "status": "error"}
+
+        try:
+            file_content = minio_client.download_file(
+                bucket=minio_client.bucket_blackbox,
+                object_name=log_entry.file_path,
+            )
+
+            from app.analysis.utils import load_parser_from_file_content
+            from app.analysis.flight_summary import analyze_flight_summary
+            from app.models import LogAnalysis
+            from sqlalchemy import delete
+
+            parser = load_parser_from_file_content(file_content)
+            analysis_result = analyze_flight_summary(parser)
+
+            # Delete existing analysis for this module
+            session.execute(
+                delete(LogAnalysis).where(
+                    LogAnalysis.log_id == log_id,
+                    LogAnalysis.module == "flight_summary"
+                )
+            )
+
+            # Store result
+            analysis = LogAnalysis(
+                log_id=log_id,
+                module="flight_summary",
+                result_json=analysis_result,
+            )
+            session.add(analysis)
+            session.commit()
+
+            return {
+                "log_id": log_id,
+                "module": "flight_summary",
+                "status": "success",
+            }
+        except Exception as e:
+            logger.error(f"Error analyzing flight summary for log {log_id}: {e}")
+            return {
+                "log_id": log_id,
+                "module": "flight_summary",
                 "status": "error",
                 "error": str(e),
             }

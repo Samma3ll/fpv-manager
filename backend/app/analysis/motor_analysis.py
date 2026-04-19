@@ -4,7 +4,7 @@ import logging
 import numpy as np
 from typing import Dict, Any, Optional, List
 
-from .utils import extract_field_data, calculate_stats, calculate_rms, find_peaks
+from .utils import extract_fields, calculate_stats, calculate_rms, find_peaks
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,23 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
         logger.warning("No motor fields found")
         return {"error": "No motor data found"}
     
+    requested_fields = [field for _, field in motor_fields]
+    if "time" in parser.field_names:
+        requested_fields.append("time")
+    if "rcCommand[3]" in parser.field_names:
+        requested_fields.append("rcCommand[3]")
+    for i in range(4):
+        f = f"eRPM[{i}]"
+        if f in parser.field_names:
+            requested_fields.append(f)
+
+    fields = extract_fields(parser, requested_fields)
+
     # Analyze each motor
     motor_data_list = []
     
     for motor_idx, motor_field in motor_fields:
-        motor_data = extract_field_data(parser, motor_field)
+        motor_data = fields.get(motor_field)
         
         if motor_data is None:
             logger.warning(f"Could not extract {motor_field}")
@@ -65,7 +77,7 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
     # Analyze overall characteristics
     if len(motor_data_list) >= 2:
         try:
-            overall = _analyze_overall_motors(motor_data_list, parser)
+            overall = _analyze_overall_motors(motor_data_list, parser, fields)
             result["overall"] = overall
         except Exception as e:
             logger.error(f"Error analyzing overall motors: {e}")
@@ -76,28 +88,28 @@ def analyze_motor_output(parser) -> Dict[str, Any]:
 
 def _analyze_motor(motor_data: np.ndarray, motor_idx: int) -> Dict[str, Any]:
     """
-    Compute per-motor output metrics from a time-series sample array.
+    Compute summary diagnostics for a single motor's output time series.
     
-    Analyzes a single motor's time-series by removing NaNs, computing summary statistics (mean/min/max/rms/std), estimating an idle output from an initial stable window, identifying an "active" output region above a threshold, and counting large sample-to-sample changes indicative of throttle/input events.
+    Analyzes the provided 1-D sample array and returns per-motor metrics including central tendency, spread, an estimated idle (low-output) level, fraction of samples considered "active", and a count of large sample-to-sample changes that likely indicate throttle/input events.
     
     Parameters:
         motor_data (np.ndarray): 1-D array of motor output samples (may contain NaNs).
-        motor_idx (int): Index of the motor being analyzed (used for identification only).
+        motor_idx (int): Index of the motor being analyzed (used only for identification in calling code).
     
     Returns:
-        dict: Analysis results or an error dict. Successful result contains:
-            - avg_output (float): Mean output over valid samples.
-            - min_output (float): Minimum valid sample.
-            - max_output (float): Maximum valid sample.
+        dict: On success, a mapping with the following keys:
+            - avg_output (float): Mean of valid samples.
+            - min_output (float): Minimum of valid samples.
+            - max_output (float): Maximum of valid samples.
             - output_range (float): max_output - min_output.
             - rms_output (float): Root-mean-square of valid samples.
             - output_std (float): Standard deviation of valid samples.
-            - idle_estimate (float): Estimated idle/low-output level from an initial window.
-            - activity_level (float): Fraction of samples above the active threshold (0.0–1.0).
-            - throttle_changes (int): Count of large sample-to-sample changes (spike events).
-            - active_output_stats (dict, optional): Summary stats for samples in the active region (same keys as the general stats) present only if active samples exist.
+            - idle_estimate (float): Estimated idle/low-output level derived from an initial sample window.
+            - activity_level (float): Fraction of valid samples above the active threshold (0.0–1.0).
+            - throttle_changes (int): Number of large sample-to-sample changes (spike events).
+            - active_output_stats (dict, optional): Summary stats for samples in the active region (same stat keys as above), present only if active samples exist.
         Or:
-            {"error": "No valid motor data"} if no non-NaN samples are available.
+            {"error": "No valid motor data"} if the input contains no non-NaN samples.
     """
     # Remove invalid data
     motor_clean = motor_data[~np.isnan(motor_data)]
@@ -147,21 +159,25 @@ def _analyze_motor(motor_data: np.ndarray, motor_idx: int) -> Dict[str, Any]:
     return result
 
 
-def _analyze_overall_motors(motor_data_list: List[tuple], parser) -> Dict[str, Any]:
+def _analyze_overall_motors(motor_data_list: List[tuple], parser, fields: Dict[str, np.ndarray]) -> Dict[str, Any]:
     """
-    Compute cross-motor balance and synchronization metrics from multiple motor time series.
-
+    Compute cross-motor balance, synchronization, and auxiliary metrics from multiple motor time series.
+    
     Parameters:
-        motor_data_list (List[tuple]): List of (motor_index, motor_data) tuples where `motor_data` is a 1-D numeric array or sequence for that motor.
-        parser: Parser instance to derive sampling frequency for resonance detection.
-
+        motor_data_list (List[tuple]): List of (motor_index, motor_data) tuples where `motor_data` is a 1-D numeric sequence for that motor; analyses use the common truncated window across motors.
+        parser: Parser instance (passed for historical compatibility; not required by all analyses).
+        fields (Dict[str, np.ndarray]): Mapping of extracted time-series fields (e.g., `"time"`, `"rcCommand[3]"`, `"eRPM[i]"`) used for resonance detection, throttle correlation, and eRPM summaries.
+    
     Returns:
-        dict: Analysis results containing:
+        dict: Aggregated metrics including:
             - imbalance_pct (float): Coefficient of variation of per-motor means expressed as a percentage.
             - motor_correlation_mean (float), motor_correlation_min (float), motor_correlation_max (float): Mean, minimum, and maximum pairwise Pearson correlation values (present when four motors are analyzed).
-            - motor_deviations (List[float]): Per-motor deviation from the overall mean (mean over the common truncated window).
-            - max_deviation (float): Maximum absolute deviation among motors.
-            - potential_resonance_peaks (List[float]): Frequencies (Hz) of resonance peaks commonly observed across motors.
+            - motor_deviations (List[float]): Per-motor deviation from the overall mean computed over the common truncated window.
+            - max_deviation (float): Maximum absolute per-motor deviation.
+            - potential_resonance_peaks (List[float]): Frequencies in Hz of resonance peaks commonly observed across motors (may be empty).
+            - throttle_correlation (float, optional): Pearson correlation between averaged motor output and `rcCommand[3]` when sufficient throttle samples exist.
+            - erpm_mean (float, optional): Mean of stacked available `eRPM[i]` series (computed on a common truncated window).
+            - erpm_std (float, optional): Standard deviation of the stacked `eRPM[i]` series.
     """
     result = {}
 
@@ -213,34 +229,49 @@ def _analyze_overall_motors(motor_data_list: List[tuple], parser) -> Dict[str, A
     
     # Resonance in motor outputs
     # Check if there are common frequency peaks across motors
-    resonance_peaks = _find_motor_resonances(motor_data_list, parser)
+    time_data = fields.get("time")
+    time_array = time_data / 1_000_000.0 if time_data is not None else None
+    resonance_peaks = _find_motor_resonances(motor_data_list, time_array)
     result["potential_resonance_peaks"] = resonance_peaks
+
+    throttle = fields.get("rcCommand[3]")
+    if throttle is not None and len(throttle) > 10:
+        thr_min_len = min(global_min_len, len(throttle))
+        avg_motor = np.mean(np.vstack([data[:thr_min_len] for _, data in motor_data_list]), axis=0)
+        thr = throttle[:thr_min_len]
+
+        if np.std(avg_motor) > 0 and np.std(thr) > 0:
+            result["throttle_correlation"] = float(np.corrcoef(avg_motor, thr)[0, 1])
+
+    erpm_fields = [fields.get(f"eRPM[{i}]") for i in range(4) if fields.get(f"eRPM[{i}]") is not None]
+    if erpm_fields:
+        erpm_min_len = min(len(x) for x in erpm_fields)
+        erpm_stack = np.vstack([x[:erpm_min_len] for x in erpm_fields])
+        result["erpm_mean"] = float(np.mean(erpm_stack))
+        result["erpm_std"] = float(np.std(erpm_stack))
 
     return result
 
 
-def _find_motor_resonances(motor_data_list: List[tuple], parser) -> List[float]:
+def _find_motor_resonances(motor_data_list: List[tuple], time_array: Optional[np.ndarray]) -> List[float]:
     """
-    Identify frequency peaks that appear across multiple motors' output spectra.
-
+    Identify candidate resonance frequencies present across multiple motors' output spectra.
+    
     Parameters:
-        motor_data_list (List[tuple]): Iterable of (motor_idx, motor_data) where `motor_data` is a 1-D numeric sequence of time-domain samples for that motor.
-        parser: Parser instance to derive time array and compute sampling frequency.
-
+        motor_data_list (List[tuple]): Iterable of (motor_idx, motor_samples) where `motor_samples` is a 1-D numeric sequence of time-domain samples for that motor.
+        time_array (Optional[np.ndarray]): 1-D array of time stamps in seconds used to derive the sampling interval; if missing or invalid, no resonance analysis is performed.
+    
     Returns:
-        List[float]: Sorted list of candidate resonant frequencies in Hz (typically within 10–500 Hz). Returns an empty list if fewer than two motors provide valid data or if analysis fails.
+        List[float]: Sorted list of candidate resonance frequencies in Hz (typically within 10–500 Hz). Returns an empty list if fewer than two motors supply valid data or if the analysis cannot be performed.
     """
     try:
         from scipy import signal as scipy_signal
-        from .utils import get_time_array
-
         resonances = []
 
         if len(motor_data_list) < 2:
             return resonances
 
-        # Derive sampling frequency from time array
-        time_array = get_time_array(parser)
+        # Derive sampling frequency from extracted time array
         if time_array is None or len(time_array) < 2:
             logger.warning("Cannot compute sampling frequency: no valid time data")
             return resonances

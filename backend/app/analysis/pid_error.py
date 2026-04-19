@@ -4,7 +4,7 @@ import logging
 import numpy as np
 from typing import Dict, Any, Optional
 
-from .utils import extract_field_data, calculate_stats, calculate_rms
+from .utils import extract_fields, calculate_stats, calculate_rms
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,16 @@ def analyze_pid_error(parser) -> Dict[str, Any]:
     """
     result = {}
     
+    requested_fields = []
+    for axis_idx in range(3):
+        requested_fields.append(f"gyroADC[{axis_idx}]")
+        if f"setpoint[{axis_idx}]" in parser.field_names:
+            requested_fields.append(f"setpoint[{axis_idx}]")
+        if f"axisError[{axis_idx}]" in parser.field_names:
+            requested_fields.append(f"axisError[{axis_idx}]")
+
+    fields = extract_fields(parser, requested_fields)
+
     # Analyze each axis (roll=0, pitch=1, yaw=2)
     axes = [("roll", 0), ("pitch", 1), ("yaw", 2)]
     
@@ -31,8 +41,8 @@ def analyze_pid_error(parser) -> Dict[str, Any]:
         rate_field = f"setpoint[{axis_idx}]"
         gyro_field = f"gyroADC[{axis_idx}]"
         
-        rate_cmd = extract_field_data(parser, rate_field)
-        gyro_data = extract_field_data(parser, gyro_field)
+        rate_cmd = fields.get(rate_field)
+        gyro_data = fields.get(gyro_field)
         
         if gyro_data is None or rate_cmd is None:
             logger.warning(f"Missing data for {axis_name} axis")
@@ -40,12 +50,25 @@ def analyze_pid_error(parser) -> Dict[str, Any]:
             continue
         
         try:
-            # Calculate error as difference between commanded and actual
-            # Need to ensure arrays are same length
+            axis_error_field = f"axisError[{axis_idx}]"
+            axis_error_data = fields.get(axis_error_field)
+
             min_len = min(len(gyro_data), len(rate_cmd))
-            error = rate_cmd[:min_len] - gyro_data[:min_len]
+            if axis_error_data is not None and len(axis_error_data) > 0:
+                min_len = min(min_len, len(axis_error_data))
+                error = axis_error_data[:min_len]
+                error_source = axis_error_field
+            else:
+                # Fall back to setpoint - gyro if axisError is not logged.
+                error = rate_cmd[:min_len] - gyro_data[:min_len]
+                error_source = "setpoint_minus_gyro"
             
             axis_result = _analyze_axis_error(error, axis=axis_name)
+            axis_result["error_source"] = error_source
+            axis_result["error_vs_setpoint"] = _error_vs_setpoint(
+                error,
+                rate_cmd[:min_len],
+            )
             result[axis_name] = axis_result
         except Exception as e:
             logger.error(f"Error analyzing {axis_name} PID error: {e}")
@@ -130,3 +153,66 @@ def _analyze_axis_error(error: np.ndarray, axis: str = "unknown") -> Dict[str, A
     }
     
     return result
+
+
+def _error_vs_setpoint(error: np.ndarray, setpoint: np.ndarray) -> Dict[str, Any]:
+    """
+    Produce bin-wise aggregation of absolute tracking error grouped by absolute setpoint magnitude.
+    
+    Parameters:
+        error (np.ndarray): 1-D array of tracking errors aligned with `setpoint`.
+        setpoint (np.ndarray): 1-D array of commanded rates; absolute values define bin membership.
+    
+    Returns:
+        Dict[str, Any]: A dictionary with key `"bins"` containing a list of bin records. Each record has:
+            - `setpoint_min` (float): lower bound of the bin (inclusive).
+            - `setpoint_max` (float): upper bound of the bin (inclusive for the final bin, exclusive otherwise).
+            - `mean_abs_error` (float): mean of absolute errors for samples in the bin.
+            - `sample_count` (int): number of samples in the bin.
+        Returns `{"bins": []}` when inputs are empty or when the maximum absolute setpoint is non-positive.
+    """
+    if len(error) == 0 or len(setpoint) == 0:
+        return {"bins": []}
+
+    n = min(len(error), len(setpoint))
+    error_aligned = error[:n]
+    setpoint_aligned = setpoint[:n]
+
+    # Filter to finite samples only
+    finite_mask = np.isfinite(error_aligned) & np.isfinite(setpoint_aligned)
+    error_aligned = error_aligned[finite_mask]
+    setpoint_aligned = setpoint_aligned[finite_mask]
+
+    if len(error_aligned) == 0:
+        return {"bins": []}
+
+    n = len(error_aligned)
+    abs_err = np.abs(error_aligned)
+    abs_sp = np.abs(setpoint_aligned)
+
+    max_sp = float(np.max(abs_sp)) if n > 0 else 0.0
+    if max_sp <= 0:
+        return {"bins": []}
+
+    bin_count = 20
+    edges = np.linspace(0.0, max_sp, bin_count + 1)
+    bins = []
+    for i in range(bin_count):
+        lo = edges[i]
+        hi = edges[i + 1]
+        if i == bin_count - 1:
+            mask = (abs_sp >= lo) & (abs_sp <= hi)
+        else:
+            mask = (abs_sp >= lo) & (abs_sp < hi)
+        if not np.any(mask):
+            continue
+        bins.append(
+            {
+                "setpoint_min": float(lo),
+                "setpoint_max": float(hi),
+                "mean_abs_error": float(np.mean(abs_err[mask])),
+                "sample_count": int(np.sum(mask)),
+            }
+        )
+
+    return {"bins": bins}
