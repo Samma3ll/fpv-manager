@@ -113,11 +113,14 @@ def _analyze_axis_fft(gyro_data: np.ndarray, fs: float, axis: str = "unknown") -
 
     # Welch PSD is closer to the Blackbox analyser output than a single FFT.
     nperseg = int(min(4096, max(256, n // 4)))
+    nperseg = min(nperseg, n)
+    nperseg = max(nperseg, 2)
+    noverlap = nperseg // 2
     freqs, psd = scipy_signal.welch(
         gyro_mean_removed,
         fs=fs,
         nperseg=nperseg,
-        noverlap=nperseg // 2,
+        noverlap=noverlap,
         window="hann",
         scaling="density",
     )

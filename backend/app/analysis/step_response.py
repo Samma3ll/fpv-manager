@@ -129,13 +129,13 @@ def _analyze_axis_response(
     rate_cmd_derivative = calculate_derivative(rate_cmd, dt)
     abs_deriv = np.abs(rate_cmd_derivative)
     if abs_deriv.size == 0:
-        return {"warning": "No command derivative data", **calculate_stats(gyro_data)}
+        return {"warning": "No command derivative data", "gyro_stats": calculate_stats(gyro_data)}
 
     rate_threshold = float(np.percentile(abs_deriv, 98))
     if rate_threshold <= 0:
         rate_threshold = float(np.max(abs_deriv))
     if rate_threshold <= 0:
-        return {"warning": "No command activity", **calculate_stats(gyro_data)}
+        return {"warning": "No command activity", "gyro_stats": calculate_stats(gyro_data)}
     
     # Find indices where rate command changes
     step_indices = np.where(np.abs(rate_cmd_derivative) > rate_threshold)[0]

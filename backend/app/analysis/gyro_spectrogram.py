@@ -249,6 +249,13 @@ def _freq_vs_throttle(
     n = len(gyro_data)
     chunk_len = max(64, int(round(fs * CHUNK_TIME_MS / 1000)))
     chunk_step = max(1, chunk_len // WINDOW_DIVISOR)
+
+    # Pad input if too short to ensure at least one chunk is processed
+    if n < chunk_len:
+        pad_width = chunk_len - n
+        gyro_data = np.pad(gyro_data, (0, pad_width), mode='constant', constant_values=0)
+        n = len(gyro_data)
+
     fft_size = _next_power_of_2(chunk_len)
     mag_len = fft_size // 2  # one-sided spectrum
 
@@ -260,7 +267,7 @@ def _freq_vs_throttle(
     # Hann window for the chunk length
     window = scipy_signal.windows.hann(chunk_len)
 
-    for start in range(0, n - chunk_len, chunk_step):
+    for start in range(0, n - chunk_len + 1, chunk_step):
         chunk = gyro_data[start:start + chunk_len].astype(np.float64)
 
         # Apply Hann window

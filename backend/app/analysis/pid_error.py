@@ -175,8 +175,20 @@ def _error_vs_setpoint(error: np.ndarray, setpoint: np.ndarray) -> Dict[str, Any
         return {"bins": []}
 
     n = min(len(error), len(setpoint))
-    abs_err = np.abs(error[:n])
-    abs_sp = np.abs(setpoint[:n])
+    error_aligned = error[:n]
+    setpoint_aligned = setpoint[:n]
+
+    # Filter to finite samples only
+    finite_mask = np.isfinite(error_aligned) & np.isfinite(setpoint_aligned)
+    error_aligned = error_aligned[finite_mask]
+    setpoint_aligned = setpoint_aligned[finite_mask]
+
+    if len(error_aligned) == 0:
+        return {"bins": []}
+
+    n = len(error_aligned)
+    abs_err = np.abs(error_aligned)
+    abs_sp = np.abs(setpoint_aligned)
 
     max_sp = float(np.max(abs_sp)) if n > 0 else 0.0
     if max_sp <= 0:

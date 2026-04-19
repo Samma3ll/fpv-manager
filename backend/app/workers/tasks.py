@@ -427,8 +427,8 @@ def run_all_analyses(self, log_id: int):
             if parser_ctx is not None:
                 try:
                     parser_ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.exception("Failed to clean up parser temp file")
 
 
 @shared_task(bind=True, name="analyze_log_step_response")
