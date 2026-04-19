@@ -273,7 +273,11 @@ def run_all_analyses(self, log_id: int):
         enabled_modules = session.execute(
             select(Module).where(Module.enabled == True, Module.module_type == "analysis")  # noqa: E712
         ).scalars().all()
-        enabled_names = {m.name for m in enabled_modules}
+        enabled_names = {
+            m if isinstance(m, str) else m.name
+            for m in enabled_modules
+            if m is not None
+        }
         logger.info(f"Enabled analysis modules: {enabled_names}")
 
         try:
